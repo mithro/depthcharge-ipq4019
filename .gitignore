@@ -1,0 +1,22 @@
+# Build artifacts
+/build/
+*.o
+*.a
+*.elf
+*.bin
+*.payload
+*.rom
+*.map
+*.tmp
+
+# Upstream trees fetched for building/reference (not vendored)
+/depthcharge/
+/u-boot/
+/openwrt/
+/coreboot/
+/chromiumos/
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
