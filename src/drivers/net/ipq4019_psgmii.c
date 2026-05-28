@@ -18,14 +18,18 @@
 #include "drivers/net/ipq4019.h"
 
 /*
- * ESS block reset via GCC. IPQ4019 GCC base = 0x1800000 (Linux/U-Boot);
- * GCC_ESS_BCR is the ESS block-control-reset register.
- * NOTE: offset to be confirmed on hardware (docs/hardware.md §7.1). If coreboot
- * already de-asserts ESS reset this is harmless; if the offset is wrong the
- * self-test "PLL_VCO_CALIB Not Ready" prints will flag it during bring-up.
+ * ESS block reset via GCC. IPQ4019 GCC base = 0x1800000.
+ *
+ * GCC_ESS_BCR offset confirmed from the upstream Linux IPQ4019 GCC driver
+ * (drivers/clk/qcom/gcc-ipq4019.c):
+ *
+ *     [GCC_ESS_BCR] = { 0x12008, 0 },
+ *
+ * where the second 0 indicates bit 0 — the standard Qualcomm BCR BLK_ARES
+ * assertion bit. (The same offset also appears as [ESS_RESET] in that file.)
  */
 #define IPQ4019_GCC_BASE	0x01800000
-#define GCC_ESS_BCR		0x1200		/* TODO verify */
+#define GCC_ESS_BCR		0x12008
 #define GCC_ESS_BCR_BLK_ARES	(1 << 0)
 
 static void *const ess = (void *)IPQ4019_ESS_BASE;
