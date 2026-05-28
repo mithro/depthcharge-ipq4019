@@ -162,3 +162,37 @@ back to offsets `0x0–0x800000`.
 - `tmp/fresh_cycle.py` — fresh cycle, no commands, default behaviour.
 - `tmp/probe_state.py` — post-failure GPIO + console + read probe.
 - `tmp/layout.txt` — flashrom layout file (bypasses contended FMAP read).
+- `tmp/diag_busfidelity.py` — read FMAP × 3, compare-vote vs. stock.
+- `tmp/multi_cycle_probe.py` — N cycles, hammer `flashrom --flash-name`, watch USB.
+- `tmp/restore_bootblock.py` — multi-cycle attempt to write stock 4KB bootblock.
+
+### Final state (2026-05-28, end of session)
+
+- Multi-cycle probe demonstrated **a brief readable window does exist** —
+  in one of four power-cycles, `flashrom --flash-name` detected the chip
+  cleanly at **t+0.8 s** after USB-port power restore. 46 of ~58 rapid
+  RDID attempts had failed before that one succeeded.
+- That detection rate was **not reproducible**. Subsequent runs (multiple
+  6–7-cycle batches, 30-second VCC hold-off, EC reboot, various GPIO
+  states) recorded **0 detections in 1400+ flashrom RDID attempts**.
+- No Qualcomm/EDL USB device ever appeared on any port across all probes
+  (so the IPQ4019 bootrom on gale really does not fall back to USB-boot
+  on a corrupted bootblock).
+- AP UART remained silent throughout.
+
+The cycle-to-cycle degradation pattern (~25 % detection earlier in the
+session → 0 % later) strongly suggests the repeated contended writes
+this session further degraded chip state (likely partial-write side-
+effects on individual cells / status register).
+
+**Conclusion: SuzyQ-side recovery on this gale is no longer feasible.**
+The device is bricked from this interface. Recovery requires a CH341A
+(or equivalent) SPI flash clip onto the W25Q64FV to write back the saved
+stock dump `gale-spi-stock-2026-05-28.bin` (offsets `0x0–0x800000`,
+sha256 `735b1c5adc3399d8257915d28b3df0313c3e2f64ab8385297c5b1a7eb10012d9`).
+
+After the device is recovered to stock, **the recommended re-entry is
+Approach A**: sign a fresh netboot payload with devkeys, splice it into
+`FW_MAIN_A` only (no `COREBOOT` writes), and clear `USE_RO_NORMAL` in the
+RW preamble — keep `COREBOOT/RO` strictly pristine so the stock recovery
+loop is always there to release the SPI bus.
