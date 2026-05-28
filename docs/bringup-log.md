@@ -45,11 +45,20 @@ SuzyQ (2026-05-28). Corrects/extends `hardware.md`.
 
 ## Netboot payload (the goal target)
 
-`tmp/tftproot/openwrt-gale-initramfs.itb.vboot` =
 `openwrt-25.12.2-ipq40xx-chromium-google_wifi-initramfs-fit-zImage.itb.vboot`
-(downloaded). It's a **ChromeOS vboot kernel** (`CHROMEOS` magic) wrapping a FIT
-(kernel + embedded initramfs + fdt) — exactly the depthcharge-netboot "kernel+initrd"
-format. Serve via dnsmasq DHCP(`dhcp-boot`)+TFTP on the gale-connected NIC.
+(downloaded) is a **ChromeOS vboot kernel** (`CHROMEOS` magic) wrapping a FIT at
+offset **0x10000**.
+
+**Gotcha (caught before it bit us):** depthcharge netboot's `boot()` (ARM,
+`src/arch/arm/fit.c`) calls `fit_load(bi->kernel)` which needs a **raw FIT
+(`d00dfeed`) at the payload start** — it does NOT strip the vboot/`CHROMEOS`
+wrapper. So the `.itb.vboot` would fail `fit_load`. **Fix: extract the raw FIT**
+from offset 0x10000 (length = FDT `totalsize` BE@+4) →
+`tmp/tftproot/openwrt-gale.itb`. `dumpimage -l` confirms it: kernel-1 = ARM OpenWrt
+Linux-6.12.74 (8 MB, embedded initramfs) **load/entry 0x80208000** (== gale
+`CONFIG_KERNEL_START`), fdt-1 = `google_wifi` DTB. That raw `.itb` is the netboot
+bootfile (`dhcp-boot=openwrt-gale.itb`); the kernel boots its embedded initramfs =
+"kernel+initrd". dnsmasq DHCP+TFTP runs on `enx00e04c68016b` (10.42.1.1).
 
 ## Next steps
 
