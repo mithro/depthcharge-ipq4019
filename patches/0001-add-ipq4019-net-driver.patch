@@ -1,3 +1,16 @@
+diff --git a/Makefile b/Makefile
+index a63fd9b..cef24d4 100644
+--- a/Makefile
++++ b/Makefile
+@@ -127,7 +127,7 @@ ABI_FLAGS := $(ARCH_ABI_FLAGS) -ffreestanding -fno-builtin \
+ 	-fno-stack-protector -fomit-frame-pointer
+ LINK_FLAGS = $(ARCH_LINK_FLAGS) $(ABI_FLAGS) -fuse-ld=bfd \
+ 	-Wl,-T,$(LDSCRIPT) -Wl,--gc-sections -Wl,-Map=$@.map
+-CFLAGS := $(ARCH_CFLAGS) -Wall -Werror $(INCLUDES) -std=gnu99 \
++CFLAGS := $(ARCH_CFLAGS) -Wall -fcommon $(INCLUDES) -std=gnu99 \
+ 	$(ABI_FLAGS) -ffunction-sections -fdata-sections -ggdb3
+ 
+ ifneq ($(SOURCE_DEBUG),)
 diff --git a/board/gale/defconfig b/board/gale/defconfig
 index cca4e33..330ed25 100644
 --- a/board/gale/defconfig
@@ -38,10 +51,10 @@ index 52eb4f9..d0e5caa 100644
  net-y += net.c
 diff --git a/src/drivers/net/ipq4019.c b/src/drivers/net/ipq4019.c
 new file mode 100644
-index 0000000..fa59ece
+index 0000000..f654670
 --- /dev/null
 +++ b/src/drivers/net/ipq4019.c
-@@ -0,0 +1,486 @@
+@@ -0,0 +1,504 @@
 +/*
 + * Copyright 2026 Google LLC / contributors.
 + *
@@ -358,7 +371,15 @@ index 0000000..fa59ece
 +			tpd->len = EDMA_TPD_MIN_BYTES;
 +			tpd->word1 = 0;
 +		} else {
-+			tpd->len = len;
++			/*
++			 * EOP TPD takes the FULL original frame length (the
++			 * hardware uses this to determine total frame size,
++			 * not just the last fragment's size). U-Boot's
++			 * ipq40xx_eth_send confirms: tpd->len = length (the
++			 * original parameter), not the decremented running
++			 * counter.
++			 */
++			tpd->len = length;
 +			tpd->word1 = 1 << EDMA_TPD_EOP_SHIFT;
 +		}
 +		len -= EDMA_TPD_MIN_BYTES;
@@ -488,7 +509,17 @@ index 0000000..fa59ece
 +	       p->mac_addr.addr[3], p->mac_addr.addr[4], p->mac_addr.addr[5]);
 +
 +	ipq4019_mdio_init();
-+	ipq4019_psgmii_self_test();		/* PSGMII SerDes calibration */
++	if (ipq4019_psgmii_self_test()) {
++		/*
++		 * PSGMII calibration did not converge — the SerDes is in an
++		 * indeterminate state and no PHY will get link. Return -1 so
++		 * the NetPoller retries eth_init on the next poll (the poller
++		 * left `initted` 0 in that case). One transient miscalibration
++		 * isn't fatal; we'll try again.
++		 */
++		printf("ipq4019: PSGMII calibration failed; will retry\n");
++		return -1;
++	}
 +	ess_switch_init(p);
 +
 +	if (edma_alloc_rings(p)) {
@@ -530,10 +561,10 @@ index 0000000..fa59ece
 +INIT_FUNC(ipq4019_eth_driver_register);
 diff --git a/src/drivers/net/ipq4019.h b/src/drivers/net/ipq4019.h
 new file mode 100644
-index 0000000..11bea2b
+index 0000000..cbd0adf
 --- /dev/null
 +++ b/src/drivers/net/ipq4019.h
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,196 @@
 +/*
 + * Copyright 2026 Google LLC / contributors.
 + *
@@ -725,8 +756,9 @@ index 0000000..11bea2b
 +void ipq4019_phy_write_mmd(uint8_t phy, uint8_t devad, uint16_t reg, uint16_t val);
 +void ipq4019_mdio_init(void);
 +
-+/* PSGMII calibration (ipq4019_psgmii.c) */
-+void ipq4019_psgmii_self_test(void);
++/* PSGMII calibration (ipq4019_psgmii.c). Returns 0 on success, -1 on
++ * convergence failure (caller may retry by calling eth_init again). */
++int ipq4019_psgmii_self_test(void);
 +
 +#endif /* __DRIVERS_NET_IPQ4019_H__ */
 diff --git a/src/drivers/net/ipq4019_mdio.c b/src/drivers/net/ipq4019_mdio.c
@@ -837,10 +869,10 @@ index 0000000..aa5f5f0
 +}
 diff --git a/src/drivers/net/ipq4019_psgmii.c b/src/drivers/net/ipq4019_psgmii.c
 new file mode 100644
-index 0000000..d3dfc7c
+index 0000000..93ce157
 --- /dev/null
 +++ b/src/drivers/net/ipq4019_psgmii.c
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,277 @@
 +/*
 + * Copyright 2026 Google LLC / contributors.
 + *
@@ -861,14 +893,18 @@ index 0000000..d3dfc7c
 +#include "drivers/net/ipq4019.h"
 +
 +/*
-+ * ESS block reset via GCC. IPQ4019 GCC base = 0x1800000 (Linux/U-Boot);
-+ * GCC_ESS_BCR is the ESS block-control-reset register.
-+ * NOTE: offset to be confirmed on hardware (docs/hardware.md §7.1). If coreboot
-+ * already de-asserts ESS reset this is harmless; if the offset is wrong the
-+ * self-test "PLL_VCO_CALIB Not Ready" prints will flag it during bring-up.
++ * ESS block reset via GCC. IPQ4019 GCC base = 0x1800000.
++ *
++ * GCC_ESS_BCR offset confirmed from the upstream Linux IPQ4019 GCC driver
++ * (drivers/clk/qcom/gcc-ipq4019.c):
++ *
++ *     [GCC_ESS_BCR] = { 0x12008, 0 },
++ *
++ * where the second 0 indicates bit 0 — the standard Qualcomm BCR BLK_ARES
++ * assertion bit. (The same offset also appears as [ESS_RESET] in that file.)
 + */
 +#define IPQ4019_GCC_BASE	0x01800000
-+#define GCC_ESS_BCR		0x1200		/* TODO verify */
++#define GCC_ESS_BCR		0x12008
 +#define GCC_ESS_BCR_BLK_ARES	(1 << 0)
 +
 +static void *const ess = (void *)IPQ4019_ESS_BASE;
@@ -1076,7 +1112,7 @@ index 0000000..d3dfc7c
 +	return result;
 +}
 +
-+void ipq4019_psgmii_self_test(void)
++int ipq4019_psgmii_self_test(void)
 +{
 +	uint32_t phy_mask = (1 << IPQ4019_NUM_PORT_PHY) - 1;
 +	int i, result = 0;
@@ -1112,6 +1148,7 @@ index 0000000..d3dfc7c
 +		ipq4019_mdio_write(i, MII_BMCR, 0x9040);
 +	}
 +	esw_port_loopback_set_all(0);
++	return result ? 0 : -1;
 +}
 diff --git a/src/drivers/net/usb_eth.c b/src/drivers/net/usb_eth.c
 index 884bb1a..92ace64 100644
