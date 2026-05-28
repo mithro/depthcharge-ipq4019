@@ -196,3 +196,75 @@ Approach A**: sign a fresh netboot payload with devkeys, splice it into
 `FW_MAIN_A` only (no `COREBOOT` writes), and clear `USE_RO_NORMAL` in the
 RW preamble — keep `COREBOOT/RO` strictly pristine so the stock recovery
 loop is always there to release the SPI bus.
+
+---
+
+## Late-session followup: hard power cycle via UCSI
+
+User clarified: the whole setup (SuzyQ + gale + ethernet adapters) is
+powered through a USB-C hub on the laptop's port0. After a physical
+unplug of that hub, the gale briefly responded — `coreboot-... bootblock
+start` appeared on AP UART for the first time in many cycles. This
+prompted a deeper look at the laptop's USB-C PD controls.
+
+### Mechanism: UCSI CONNECTOR_RESET
+
+- `uhubctl -f` reports the laptop's xHCI root hubs as **"nops"** (no
+  per-port power switching) and the gale's Super Top hub as **"ganged"**
+  (one global switch, not actually per-port controllable). Neither the
+  sysfs `port-disable` interface nor uhubctl can drop VBUS on this
+  hardware.
+- However, the laptop is a ThinkPad X1 Carbon Gen 11 with `ucsi_acpi`
+  driving the Type-C PD controller, and the kernel exposes a debugfs
+  command interface at `/sys/kernel/debug/usb/ucsi/USBC000:00/command`.
+- Writing the UCSI `CONNECTOR_RESET` command for connector 1 (= `port0`,
+  the gale's hub):
+  ```
+  echo 0x10003 > /sys/kernel/debug/usb/ucsi/USBC000:00/command
+  ```
+  (`0x03 | (1 << 16)`, where `1 << 16` is the connector number field.)
+- This **drops VBUS to the entire hub branch**; the gale, EC, hub, and
+  both ethernet adapters all disappear from lsusb. They reappear ~1.25 s
+  later cleanly enumerated. Verified `tmp/ucsi_hardcycle.py`.
+- Note: `power_role` swap (`echo sink > /sys/class/typec/port0/power_role`)
+  returns `I/O error` — the partner advertises PR_Swap support but the
+  hub is bus-powered and can't actually source.
+
+This means **we no longer need physical unplug for a hard cycle** in
+future sessions on this laptop with this hub layout.
+
+### What we learned about the AP boot state after a clean hard cycle
+
+With UCSI CONNECTOR_RESET + `gale power on`, the AP **does boot** —
+significantly further than was previously visible:
+
+- **Default vboot path (Slot B selected)** — boots through bootblock,
+  reads FMAP, VBLOCK_B, FW_MAIN_B; loads romstage from FW_MAIN_B's CBFS,
+  romstage runs and identifies the W25Q64; tries to load
+  `fallback/ramstage` from FW_MAIN_B's CBFS; gets
+  **`lzma: Decoding error = 1` / `Ramstage was not loaded!`**.
+  → Confirms FW_MAIN_B's compressed ramstage body is corrupted by the
+  failed erase.
+- **Dev mode + rec off path** — `gale dev on; gale rec off; gale power on`
+  triggers `Recovery requested (0x5b — DEV_REQUEST)`; vboot tries to
+  load `fallback/romstage` from **COREBOOT's** CBFS (RO region) →
+  **`Couldn't load romstage`**.
+  → Confirms RO COREBOOT's romstage CBFS entry is also corrupted.
+- **`gale rec on` (recovery boot)** — gets only to `bootblock start`
+  and halts; nothing further on UART.
+
+In **all three** failure modes the IPQ's QUP stays busy enough that
+`flashrom --flash-name` from the EC bridge never gets a clean read
+(thousands of probes across many UCSI cycles, all 0 detects).
+
+### So what we learned grounds the earlier conclusion
+
+The failed erase corrupted **both** RW Slot B's ramstage AND RO
+COREBOOT's romstage. There is no remaining coreboot path that reaches
+depthcharge to yield the SPI bus. The IPQ is "alive enough" to read
+flash for itself, but never reaches the bus-yielding payload. CH341A
+remains the only recovery path.
+
+The UCSI capability **does** simplify future bring-up post-recovery —
+the recipe at `docs/post-recovery-recipe.md` can use
+`tmp/ucsi_hardcycle.py` instead of asking the user to physically replug.
