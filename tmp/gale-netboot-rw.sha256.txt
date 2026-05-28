@@ -1,0 +1,4 @@
+size:   8388608
+sha256: 50ba2ef6271268b78cd1ee4bdf7ac4d04ad261a0509e7803a7f097f8d9cc82a4  tmp/gale-netboot-rw.bin
+built:  2026-05-28T14:48:13+09:30 from commit 2146dfd
+source: stock 8MiB + depthcharge/build/netboot.payload spliced into FW_MAIN_A and FW_MAIN_B
