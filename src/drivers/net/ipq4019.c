@@ -314,7 +314,15 @@ static int ipq4019_eth_send(NetDevice *dev, void *packet, uint16_t length)
 			tpd->len = EDMA_TPD_MIN_BYTES;
 			tpd->word1 = 0;
 		} else {
-			tpd->len = len;
+			/*
+			 * EOP TPD takes the FULL original frame length (the
+			 * hardware uses this to determine total frame size,
+			 * not just the last fragment's size). U-Boot's
+			 * ipq40xx_eth_send confirms: tpd->len = length (the
+			 * original parameter), not the decremented running
+			 * counter.
+			 */
+			tpd->len = length;
 			tpd->word1 = 1 << EDMA_TPD_EOP_SHIFT;
 		}
 		len -= EDMA_TPD_MIN_BYTES;
