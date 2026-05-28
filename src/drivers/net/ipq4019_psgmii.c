@@ -237,7 +237,7 @@ static int psgmii_st_run_test_parallel(uint32_t phy_mask)
 	return result;
 }
 
-void ipq4019_psgmii_self_test(void)
+int ipq4019_psgmii_self_test(void)
 {
 	uint32_t phy_mask = (1 << IPQ4019_NUM_PORT_PHY) - 1;
 	int i, result = 0;
@@ -273,4 +273,5 @@ void ipq4019_psgmii_self_test(void)
 		ipq4019_mdio_write(i, MII_BMCR, 0x9040);
 	}
 	esw_port_loopback_set_all(0);
+	return result ? 0 : -1;
 }

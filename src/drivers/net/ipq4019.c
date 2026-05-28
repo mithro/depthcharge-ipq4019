@@ -452,7 +452,17 @@ static int ipq4019_eth_init(void)
 	       p->mac_addr.addr[3], p->mac_addr.addr[4], p->mac_addr.addr[5]);
 
 	ipq4019_mdio_init();
-	ipq4019_psgmii_self_test();		/* PSGMII SerDes calibration */
+	if (ipq4019_psgmii_self_test()) {
+		/*
+		 * PSGMII calibration did not converge — the SerDes is in an
+		 * indeterminate state and no PHY will get link. Return -1 so
+		 * the NetPoller retries eth_init on the next poll (the poller
+		 * left `initted` 0 in that case). One transient miscalibration
+		 * isn't fatal; we'll try again.
+		 */
+		printf("ipq4019: PSGMII calibration failed; will retry\n");
+		return -1;
+	}
 	ess_switch_init(p);
 
 	if (edma_alloc_rings(p)) {

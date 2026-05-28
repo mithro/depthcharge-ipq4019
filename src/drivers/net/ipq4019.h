@@ -189,7 +189,8 @@ uint16_t ipq4019_phy_read_mmd(uint8_t phy, uint8_t devad, uint16_t reg);
 void ipq4019_phy_write_mmd(uint8_t phy, uint8_t devad, uint16_t reg, uint16_t val);
 void ipq4019_mdio_init(void);
 
-/* PSGMII calibration (ipq4019_psgmii.c) */
-void ipq4019_psgmii_self_test(void);
+/* PSGMII calibration (ipq4019_psgmii.c). Returns 0 on success, -1 on
+ * convergence failure (caller may retry by calling eth_init again). */
+int ipq4019_psgmii_self_test(void);
 
 #endif /* __DRIVERS_NET_IPQ4019_H__ */
