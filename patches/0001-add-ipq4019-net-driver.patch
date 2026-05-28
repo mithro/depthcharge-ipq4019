@@ -1113,3 +1113,24 @@ index 0000000..d3dfc7c
 +	}
 +	esw_port_loopback_set_all(0);
 +}
+diff --git a/src/drivers/net/usb_eth.c b/src/drivers/net/usb_eth.c
+index 884bb1a..92ace64 100644
+--- a/src/drivers/net/usb_eth.c
++++ b/src/drivers/net/usb_eth.c
+@@ -132,7 +132,16 @@ static int usb_eth_driver_register(void)
+ 	list_insert_after(&usb_eth_driver.list_node,
+ 			  &generic_usb_drivers);
+ 
++	/*
++	 * Only scan USB for an ethernet dongle if a USB-ethernet driver is
++	 * actually enabled. Otherwise the poll would call dc_usb_initialize()
++	 * pointlessly -- which data-aborts on gale, where the xHCI isn't
++	 * powered in the netboot/recovery context -- and starve the onboard
++	 * (IPQ4019) net poller.
++	 */
++#if CONFIG_DRIVER_NET_ASIX || CONFIG_DRIVER_NET_SMSC95XX
+ 	list_insert_after(&net_poller.list_node, &net_pollers);
++#endif
+ 
+ 	return 0;
+ }
