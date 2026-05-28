@@ -20,3 +20,15 @@
 *.swp
 *~
 .DS_Store
+
+# Additional upstream trees
+/vboot_reference/
+/flashrom-cros/
+
+# Build/clone logs in repo root
+/tmp_coreboot_clone.log
+
+# Runtime artifacts in tmp/
+/tmp/tftproot/
+/tmp/*.log
+/tmp/*.leases
