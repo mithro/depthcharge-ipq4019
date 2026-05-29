@@ -492,11 +492,13 @@ static void ipq4019_ess_clock_and_reset_init(void)
 	mdelay(10);
 	printf("ipq4019: GCC_ESS_BCR  post-toggle   = 0x%08x\n", readl(bcr));
 
-	/* Clear any stuck per-port resets (MAC1..5 + PSGMII). */
+	/* Clear any stuck per-port resets (MAC1..5 + PSGMII = bits 0..5).
+	 * Mask-clear only the known ARES bits — leave any other bits in the
+	 * register untouched (defensive against undocumented bits >5). */
 	v = readl(pares);
-	if (v) {
+	if (v & 0x3F) {
 		printf("ipq4019: clearing per-port resets, was 0x%08x\n", v);
-		writel(0, pares);
+		writel(v & ~0x3F, pares);
 		mdelay(10);
 	}
 	printf("ipq4019: GCC_ESS_PORT_ARES final    = 0x%08x\n", readl(pares));
