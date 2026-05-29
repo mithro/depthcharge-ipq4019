@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
-"""Robust RW flash: get the AP to a STABLE state (clear recovery so it boots the
+"""SUPERSEDED — based on a wrong premise. Use tmp/flash_rw.py (which is
+already correct) or the procedure in docs/keeping-suzyq-recovery-working.md.
+
+The "Avoids the hung-AP bus contention that fails the erase" framing was
+wrong: the erase failures that motivated this script were procedural
+(passing `-c <chip>` to flashrom, which forces RDID matching the EC bridge
+does not support), not actual hung-AP contention. The simple atomic
+`gale power off && flashrom -w` (no `-c`) works regardless of AP state.
+
+Original docstring follows:
+
+Robust RW flash: get the AP to a STABLE state (clear recovery so it boots the
 non-crashing stock RW dev screen), let it settle, then clean power-off + flash
-FW_MAIN_A. Avoids the hung-AP bus contention that fails the erase."""
+FW_MAIN_A."""
 import subprocess, time, serial, sys
 
 EC = "/dev/serial/by-id/usb-Google_Inc._Gale_debug-if00-port0"

@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Single read-only probe: power-cycle once + try flashrom RDID a few times.
+"""SUPERSEDED — based on a wrong hypothesis. Kept for history only.
+
+The premise here ("if RDID still fails after long VCC removal, the chip is
+permanently degraded and CH341A is required") was wrong. The RDID failures
+that motivated this probe were caused by the `-c W25Q64BV/W25Q64CV/W25Q64FV`
+flag forcing JEDEC ID matching the EC bridge doesn't support — they had
+nothing to do with chip degradation. Use the correct SuzyQ procedure
+(`gale power off && flashrom -p raiden_debug_spi -r dump.bin`, no `-c`,
+no separate probe) — see docs/keeping-suzyq-recovery-working.md.
+
+Original docstring follows:
+
+Single read-only probe: power-cycle once + try flashrom RDID a few times.
 Intended to be run after a long period of zero traffic to the device — some
 flash chips' status register can self-clear after extended VCC removal."""
 import subprocess, time, os
@@ -34,6 +46,8 @@ for attempt in range(120):  # ~20 seconds
             break
 print(f"[summary: {detects} detects in {attempt+1} attempts over {time.time()-t0:.1f}s]")
 if detects == 0:
-    print("RESULT: still unresponsive — physical CH341A recovery still required")
+    print("RESULT: probe returned 0x00 — most likely procedural (this script "
+          "uses `-c CHIP` which forces RDID matching the EC bridge does not "
+          "support); use the SuzyQ procedure in docs/keeping-suzyq-recovery-working.md")
 else:
-    print("RESULT: CHIP RESPONDED — re-evaluate SuzyQ recovery options")
+    print("RESULT: CHIP RESPONDED")

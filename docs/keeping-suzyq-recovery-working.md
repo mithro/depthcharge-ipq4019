@@ -203,8 +203,13 @@ retry_count++;
 /* attempt; return on failure so the next poll retries */
 ```
 
-This converts "driver bug = bus deadlock" into "driver bug = quiet failure".
-The AP becomes idle. `gale power off` + flashrom then works as designed.
+This is good engineering hygiene — the driver halts cleanly rather than
+spamming MDIO/PSGMII writes forever. It is **not** required for SuzyQ
+recovery: `gale power off` powers down the AP regardless of what the
+driver is doing, so the documented procedure works whether the driver
+halts or not. Bounded retries just make the failure quieter (and the
+iterate-flash-iterate loop shorter, since you don't have to wait for
+the EC's `gale power off` to take effect against a busy AP).
 
 ## CH341A recovery (true emergency only)
 

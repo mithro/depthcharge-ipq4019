@@ -1,10 +1,29 @@
 #!/usr/bin/env python3
-"""Flash GBB + VBLOCK_A + VBLOCK_B from the resigned image via SuzyQ.
+"""SUPERSEDED — overcomplicated procedure built on an unfounded hypothesis.
+Use the simpler correct procedure in docs/keeping-suzyq-recovery-working.md.
+
+The "wait for recovery loop to yield the bus" step (3) was the unfounded
+hypothesis: SuzyQ flashing does not depend on a stock recovery loop
+yielding anything. `gale power off` alone makes the bus accessible (the
+CPU is off and the EC keeps the flash powered). The UCSI hard cycle (1)
+and the boot-then-power-off detour (2) are also unnecessary.
+
+The correct procedure for the same goal is:
+  1. gpioset WP_L 1   (deassert WP for WP_RO regions like GBB)
+  2. gale power off
+  3. sudo flashrom -p raiden_debug_spi -w resigned.bin \\
+       --fmap -i GBB -i VBLOCK_A -i VBLOCK_B
+  (No `-c`, no UCSI cycle, no recovery boot, no waiting.)
+
+Original docstring follows:
+
+Flash GBB + VBLOCK_A + VBLOCK_B from the resigned image via SuzyQ.
 
 Procedure:
   1. UCSI hard-cycle to clean state.
   2. Boot to stock recovery loop (gale rec on, dev off, gale power on).
-  3. Wait for recovery loop to be running (confirms RO depthcharge is yielding the bus).
+  3. Wait for recovery loop to be running (originally claimed: confirms RO
+     depthcharge is yielding the bus — this claim was unfounded).
   4. gale power off — EC keeps the raiden bridge's VDD_3P3 alive for our writes.
   5. gpioset WP_L 1 — deassert write-protect so the GBB sector in WP_RO is writable.
   6. flashrom -w resigned.bin --fmap -i GBB -i VBLOCK_A -i VBLOCK_B  (single call).

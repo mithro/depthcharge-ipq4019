@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Attempt to restore the stock 4KB bootblock at offset 0 in the narrow clean
+"""SUPERSEDED — based on a wrong premise. Kept for history only.
+
+The "narrow window before the IPQ bootrom starts contending" framing was
+wrong. The contention this script tried to dodge was caused by passing
+`-c CHIP` to flashrom (forces RDID matching the EC bridge doesn't
+support), plus a separate `--flash-name` probe before the write (which
+re-powers the AP on exit). The correct procedure (atomic
+`gale power off && flashrom -w ...` with no `-c` and no separate probe)
+needs no timing window — see docs/keeping-suzyq-recovery-working.md.
+
+Original docstring follows:
+
+Attempt to restore the stock 4KB bootblock at offset 0 in the narrow clean
 window after a root-port power-cycle, before the IPQ bootrom starts contending.
 
 Strategy:
