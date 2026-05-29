@@ -253,16 +253,25 @@ static int psgmii_st_run_test_parallel(uint32_t phy_mask)
 	return result;
 }
 
+static void psgmii_analog_cal(void)
+{
+	/* Write the PSGMII analog PLL/VCO calibration registers.
+	 * `qca8075_ess_reset()` toggles GCC_ESS_BCR which resets the whole ESS
+	 * block including the PSGMII analog state — so any iteration that calls
+	 * qca8075_ess_reset() must re-do these writes before retrying. */
+	writel(PSGMIIPHY_PLL_VCO_VAL, psgmii + PSGMIIPHY_PLL_VCO_RELATED_CTRL);
+	writel(PSGMIIPHY_VCO_VAL, psgmii + PSGMIIPHY_VCO_CALIBRATION_CTRL_REGISTER_1);
+	mdelay(10);
+	writel(PSGMIIPHY_VCO_RST_VAL, psgmii + PSGMIIPHY_VCO_CALIBRATION_CTRL_REGISTER_1);
+}
+
 int ipq4019_psgmii_self_test(void)
 {
 	uint32_t phy_mask = (1 << IPQ4019_NUM_PORT_PHY) - 1;
 	int i, result = 0;
 
-	printf("ipq4019: PSGMII analog cal start\n");
-	writel(PSGMIIPHY_PLL_VCO_VAL, psgmii + PSGMIIPHY_PLL_VCO_RELATED_CTRL);
-	writel(PSGMIIPHY_VCO_VAL, psgmii + PSGMIIPHY_VCO_CALIBRATION_CTRL_REGISTER_1);
-	mdelay(10);
-	writel(PSGMIIPHY_VCO_RST_VAL, psgmii + PSGMIIPHY_VCO_CALIBRATION_CTRL_REGISTER_1);
+	printf("ipq4019: PSGMII analog cal (initial)\n");
+	psgmii_analog_cal();
 
 	printf("ipq4019: psgmii_st_phy_prepare 5 ports\n");
 	for (i = 0; i < IPQ4019_NUM_PORT_PHY; i++)
@@ -272,6 +281,9 @@ int ipq4019_psgmii_self_test(void)
 	for (i = 0; i < PSGMII_ST_NUM_RETRIES; i++) {
 		printf("ipq4019: try %d/%d  ess_reset ...\n", i + 1, PSGMII_ST_NUM_RETRIES);
 		qca8075_ess_reset();
+		/* RE-DO analog cal AFTER qca8075_ess_reset, since ess_reset
+		 * (BCR toggle) inside that function resets the PSGMII analog. */
+		psgmii_analog_cal();
 		esw_port_loopback_set_all(1);
 		printf("ipq4019: try %d  serial test ...\n", i + 1);
 		result = psgmii_st_run_test_serial(phy_mask);

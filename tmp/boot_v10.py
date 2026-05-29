@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UCSI cycle, boot v9, capture for 180s. Aggressive filtering: only print lines
+"""UCSI cycle, boot v10, capture for 180s. Aggressive filtering: only print lines
 matching driver progress / link / DHCP / TFTP / kernel handoff."""
 import subprocess, time, os, serial, threading
 
@@ -38,7 +38,7 @@ subprocess.run(["uv","run","--no-project","python","tmp/netboot_server.py",
                 "start","openwrt-gale.itb"], capture_output=True, timeout=15)
 
 # Start tcpdump in background to capture any DHCP/ARP traffic
-tcpdump_log = "/home/tim/local/gwifi/depthcharge-ipq4019/tmp/tcpdump-v9.log"
+tcpdump_log = "/home/tim/local/gwifi/depthcharge-ipq4019/tmp/tcpdump-v10.log"
 open(tcpdump_log, "w").close()  # truncate
 tcpdump_proc = subprocess.Popen(
     ["sudo", "tcpdump", "-l", "-nn", "-e", "-i", "enx00e04c68016b",
@@ -107,7 +107,7 @@ print(r.stdout + r.stderr)
 
 # tcpdump readout
 print("\n=== tcpdump captured packets ===")
-pcap = "/home/tim/local/gwifi/depthcharge-ipq4019/tmp/tcpdump-v9.pcap"
+pcap = "/home/tim/local/gwifi/depthcharge-ipq4019/tmp/tcpdump-v10.pcap"
 r = subprocess.run(["sudo","tcpdump","-r",pcap,"-nn","-e","-c","50"],
                    capture_output=True, text=True)
 print(r.stdout + r.stderr)

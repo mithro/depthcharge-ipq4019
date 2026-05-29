@@ -340,8 +340,35 @@ static int ipq4019_eth_send(NetDevice *dev, void *packet, uint16_t length)
 		udelay(1);
 	}
 	if (i == EDMA_TX_COMPLETE_TIMEOUT)
-		printf("ipq4019: TX timeout\n");
+		printf("ipq4019: TX timeout (frame len=%d)\n", length);
 
+	{
+		static int n_tx;
+		if (n_tx < 3) {
+			uint32_t r = readl(p->base + EDMA_REG_TPD_IDX_Q(EDMA_TXQ_ID));
+			/* Per-port MIB counters live at ess_base + 0x1000 +
+			 * port*0x100; TX_BYTE is +0x10, TX_PKT is +0x18.
+			 * Port 4 = LAN jack (gale port map). Port 0 = CPU port. */
+			uint32_t p0_tx_byte = readl(p->esw + 0x1010);
+			uint32_t p0_tx_pkt  = readl(p->esw + 0x1018);
+			uint32_t p4_tx_byte = readl(p->esw + 0x1000 + 4*0x100 + 0x10);
+			uint32_t p4_tx_pkt  = readl(p->esw + 0x1000 + 4*0x100 + 0x18);
+			uint32_t p5_tx_byte = readl(p->esw + 0x1000 + 5*0x100 + 0x10);
+			uint32_t p5_tx_pkt  = readl(p->esw + 0x1000 + 5*0x100 + 0x18);
+			printf("ipq4019: TX #%d len=%d prod_after=0x%x cons_after=0x%x iters=%d\n",
+			       n_tx + 1, length,
+			       r & EDMA_TPD_PROD_IDX_MASK,
+			       (r >> EDMA_TPD_CONS_IDX_SHIFT) & EDMA_TPD_CONS_IDX_MASK,
+			       i);
+			printf("ipq4019: MIB port0(CPU) tx_byte=%u tx_pkt=%u\n",
+			       p0_tx_byte, p0_tx_pkt);
+			printf("ipq4019: MIB port4(LAN) tx_byte=%u tx_pkt=%u\n",
+			       p4_tx_byte, p4_tx_pkt);
+			printf("ipq4019: MIB port5(WAN) tx_byte=%u tx_pkt=%u\n",
+			       p5_tx_byte, p5_tx_pkt);
+			n_tx++;
+		}
+	}
 	writel(p->tpd_head, p->base + EDMA_REG_TX_SW_CONS_IDX_Q(EDMA_TXQ_ID));
 	return 0;
 }
@@ -399,6 +426,7 @@ static int ipq4019_phy_check_link(NetDevice *dev, int *ready)
 {
 	IpqEdmaDev *p = dev->dev_data;
 	int i;
+	static int link_logged;
 
 	if (!p->started)
 		ipq4019_eth_start(p);
@@ -409,6 +437,24 @@ static int ipq4019_phy_check_link(NetDevice *dev, int *ready)
 		ipq4019_mdio_read(i, QCA807X_PHY_SPECIFIC, &v);
 		if (v & QCA807X_PHY_SPECIFIC_LINK) {
 			*ready = 1;
+			if (!link_logged) {
+				/* QCA807X_PHY_SPECIFIC (0x11) bits:
+				 *   [15:14] = speed (00=10M, 01=100M, 10=1000M)
+				 *   [13] = duplex (1=full)
+				 *   [10] = link up
+				 */
+				const char *spd = "??";
+				switch ((v >> 14) & 3) {
+				case 0: spd = "10M"; break;
+				case 1: spd = "100M"; break;
+				case 2: spd = "1G"; break;
+				}
+				printf("ipq4019: link up on PHY %d, %s/%s "
+				       "(PHY_SPECIFIC=0x%04x)\n",
+				       i, spd, (v & 0x2000) ? "full" : "half",
+				       v);
+				link_logged = 1;
+			}
 			break;
 		}
 	}
