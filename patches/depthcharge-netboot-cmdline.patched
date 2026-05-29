@@ -77,9 +77,9 @@ static void print_mac_addr(const uip_eth_addr *mac)
 static void * const payload = (void *)(uintptr_t)CONFIG_KERNEL_START;
 static const uint32_t MaxPayloadSize = CONFIG_KERNEL_SIZE;
 
-static char cmd_line[4096] = "console=ttyMSM0,115200n8 earlycon "
-			     "root=/dev/ram0 rdinit=/sbin/init "
-			     "rootwait noinitrd";
+/* For the OpenWrt initramfs FIT: rootfs is embedded in the kernel image,
+ * no root=/rdinit= needed — just kernel console. */
+static char cmd_line[4096] = "console=ttyMSM0,115200n8";
 
 int try_dhcp(uip_ipaddr_t *my_ip,
 	     uip_ipaddr_t *next_ip,
