@@ -25,10 +25,18 @@ SuzyQ (2026-05-28). Corrects/extends `hardware.md`.
   **system flashrom 1.3.0** (SFDP). Verified == stock.
 - `FW_MAIN_A`/`RW_SECTION_A/B` (≥0x400000) are **outside WP_RO** → writable with the
   AP off, no WP deassert. `COREBOOT`/WP_RO needs WP deasserted via `gpioset WP_L 1` from the EC.
-- The flash is only accessible when the **AP CPU is OFF** (`VDD_1P1_CPU_EN=0`) **and**
-  recently powered (the EC powers the flash for the bridge). A **crashed/hung AP**
-  holds the SPI bus → reads return all-`0x00`. A degraded flash state (after many
-  crash/reboot cycles) returns `0x00` and only a **physical VCC power-cycle** clears it.
+- The flash is only accessible when the **AP CPU is OFF** (`VDD_1P1_CPU_EN=0`),
+  achieved via `gale power off`. The flash chip's own power (`VDD_3P3_EN`) stays
+  on after `gale power off` (verified 2026-05-29), so the EC bridge has a powered
+  chip to talk to.
+
+  > ⚠️ The line that previously followed — "A crashed/hung AP holds the SPI bus
+  > → 0x00 reads. A degraded flash state after many crash/reboot cycles requires
+  > a physical VCC power-cycle" — was an unfounded inference. The 0x00 reads in
+  > this session were procedural (passing `-c` to flashrom, which forces RDID
+  > matching the EC bridge doesn't support). See the Correction at the bottom of
+  > this file and `docs/keeping-suzyq-recovery-working.md`. No chip degradation
+  > was ever proved.
 - No PPPS USB hub here (gale VBUS ~4.4 V/3.8 A comes from a non-uhubctl source), so
   power-cycling is manual / external.
 
@@ -71,6 +79,14 @@ bootfile (`dhcp-boot=openwrt-gale.itb`); the kernel boots its embedded initramfs
 ---
 
 ## Update: SPI bus deadlock after flashing to COREBOOT (RO)
+
+> ⚠️ **The conclusions in this section and the next are largely wrong.**
+> See the "Correction (2026-05-29)" section at the bottom of this file
+> and `docs/keeping-suzyq-recovery-working.md`. The "SuzyQ broken" /
+> "chip degraded" framing was procedural failure (wrong `flashrom`
+> arguments), not a hardware limit. Preserved here as a record of how
+> the wrong conclusion was reached, not as authoritative information.
+
 
 After "first light", I observed that the running payload was the one written into
 **`COREBOOT`** (RO), not `FW_MAIN_A` (RW). To pin down behavior I had flashed both
@@ -166,7 +182,7 @@ back to offsets `0x0–0x800000`.
 - `tmp/multi_cycle_probe.py` — N cycles, hammer `flashrom --flash-name`, watch USB.
 - `tmp/restore_bootblock.py` — multi-cycle attempt to write stock 4KB bootblock.
 
-### Final state (2026-05-28, end of session)
+### Final state (2026-05-28, end of session) — superseded; see Correction below
 
 - Multi-cycle probe demonstrated **a brief readable window does exist** —
   in one of four power-cycles, `flashrom --flash-name` detected the chip

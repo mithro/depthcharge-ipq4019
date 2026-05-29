@@ -42,35 +42,18 @@ You should see lines beginning with "coreboot", "depthcharge", "VbBoot…".
 If the AP is silent: SOMETHING is still wrong with the flashed image —
 do **not** proceed.
 
-## Step 2 — Sanity-check raiden_debug_spi access
+## Step 2 — Read back the current chip + compare to stock
 
-The reason stock was needed is that **stock's depthcharge recovery loop
-releases the SPI bus periodically**, so the EC bridge can reflash. Verify
-this works:
-
-```
-uv run --no-project python -c "
-import subprocess
-r = subprocess.run(
-    ['sudo','/usr/sbin/flashrom','-p','raiden_debug_spi',
-     '-c','W25Q64BV/W25Q64CV/W25Q64FV','--flash-name'],
-    capture_output=True, text=True, timeout=15)
-print('rc:', r.returncode); print(r.stdout + r.stderr)
-"
-```
-
-Expected: rc=0, "vendor=Winbond name=W25Q64BV/W25Q64CV/W25Q64FV".
-
-If it says "No EEPROM/flash device found": something is wrong with the
-restore. Re-verify stock dump bytes match the saved file via the CH341A
-before doing anything else.
-
-## Step 3 — Read back the current chip + compare to stock
+This both confirms the CH341A restore is byte-correct AND proves SuzyQ
+flashing works for the rest of the recipe. Use the correct SuzyQ
+procedure: atomic `gale power off` + `flashrom` with **no `-c`** and **no
+`target=`** (the EC bridge needs SFDP autodetection; `-c` forces RDID
+matching which fails). See `docs/keeping-suzyq-recovery-working.md` and
+`/home/tim/local/gwifi/gale-spi-flash-backup.md` for the full rationale.
 
 ```
 uv run --no-project python tmp/con.py "gale power off"   # AP off, flash powered
 sudo /usr/sbin/flashrom -p raiden_debug_spi \
-    -c 'W25Q64BV/W25Q64CV/W25Q64FV' \
     -r tmp/post-restore-readback.bin
 uv run --no-project python -c "
 import hashlib
@@ -81,9 +64,16 @@ print('SHA256 match:', hashlib.sha256(got).hexdigest()==hashlib.sha256(exp).hexd
 "
 ```
 
-Both should be True.
+Expected: flashrom reports
+`Found Unknown flash chip "SFDP-capable chip" (8192 kB, SPI) on raiden_debug_spi`,
+then `Reading flash... done.` in ~45 s. Size and SHA256 must both match.
 
-## Step 4 — Build the netboot image (stock + new payload in FW_MAIN_A/B)
+If `No EEPROM/flash device found` appears: most likely you passed `-c` or
+ran a separate `flashrom --flash-name` probe beforehand (each flashrom exit
+re-powers the AP, breaking the next call). Drop both and try again. If
+still failing, re-verify the CH341A restore.
+
+## Step 3 — Build the netboot image (stock + new payload in FW_MAIN_A/B)
 
 ```
 uv run --no-project python tmp/build_image_rw.py
@@ -96,7 +86,7 @@ uv run --no-project python tmp/build_image_rw.py
 #   COREBOOT (RO) is left at stock — DO NOT TOUCH IT.
 ```
 
-## Step 5 — Flash FW_MAIN_A
+## Step 4 — Flash FW_MAIN_A
 
 ```
 uv run --no-project python tmp/flash_rw.py FW_MAIN_A
@@ -111,7 +101,7 @@ uv run --no-project python tmp/flash_rw.py FW_MAIN_A
 required for normal boot, but it gives a fallback if RW_SECTION_A fails
 to load.)
 
-## Step 6 — Switch the device to dev mode + reboot
+## Step 5 — Switch the device to dev mode + reboot
 
 Dev mode causes vboot to load the **RW** firmware body (which is what we
 just flashed) without showing the recovery screen.
@@ -128,7 +118,7 @@ s.close()
 "
 ```
 
-## Step 7 — Start the DHCP+TFTP server
+## Step 6 — Start the DHCP+TFTP server
 
 ```
 uv run --no-project python tmp/netboot_server.py &
@@ -138,7 +128,7 @@ ls -la tmp/tftproot/openwrt-gale.itb
 # Expected size: 8338516 bytes (raw FDT, magic d00dfeed at offset 0).
 ```
 
-## Step 8 — Capture the boot
+## Step 7 — Capture the boot
 
 ```
 uv run --no-project python tmp/bootcap.py 60   # 60-second capture window
@@ -208,12 +198,17 @@ What you SHOULD see (in order):
 
 ## What NOT to do
 
-- **Never** flash COREBOOT (RO) on this device again, even with a verified
-  binary. The whole point of Approach A is that stock's recovery loop in
-  RO is the ONLY non-destructive reflash path; replacing it removes the
-  safety net.
-- **Never** start an erase if a clean read isn't verified first (this
-  session's lesson — see `docs/bringup-log.md` §"Update: SPI bus deadlock").
-- **Never** run multi-cycle catch loops on a contended bus — each
-  contended write degrades the chip further (this session: detection
-  rate went 25 % → 0 % over a few hundred attempts).
+- **Never** flash COREBOOT (RO) on this device unnecessarily. The
+  netboot work only needs to modify `FW_MAIN_A/B`, `VBLOCK_A/B`, and the
+  `GBB` (rootkey + flags). Keeping `COREBOOT` byte-identical to stock means
+  the device can always recovery-boot stock RO depthcharge, which is a
+  useful safety net independent of whether you ever need it.
+- **Never** pass `-c <chip>` to `flashrom -p raiden_debug_spi`. The EC
+  bridge does not surface a database-matched JEDEC ID; flashrom must
+  detect via SFDP. `-c` forces RDID matching and aborts with `id1 0x00
+  id2 0x00`. See `docs/keeping-suzyq-recovery-working.md`.
+- **Never** run a separate `flashrom --flash-name` probe before the real
+  read/write. Every flashrom exit re-powers the AP, so a probe followed
+  by a write means the write runs with the AP newly powered → contended
+  bus → fails. Use one atomic `gale power off && flashrom -w …` per
+  operation.

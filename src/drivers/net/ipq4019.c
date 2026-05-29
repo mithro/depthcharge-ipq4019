@@ -488,10 +488,13 @@ static int ipq4019_eth_init(void)
  * Bounded-retry poller. Each NetPoller invocation may call eth_init() until
  * it succeeds OR we hit IPQ4019_ETH_INIT_MAX_RETRIES (3). If we exhaust the
  * retries, we STOP calling eth_init and let depthcharge's net layer just
- * report "no link" — this keeps the AP idle (not endlessly retrying MDIO/
- * PSGMII calibration) so the EC's SuzyQ bridge can access the SPI bus for
- * a follow-up driver re-flash. This converts an unrecoverable retry loop
- * into a recoverable failed-but-quiet state.
+ * report "no link" — the driver halts cleanly instead of looping forever.
+ *
+ * This is good engineering hygiene (fast iteration, clear failure mode),
+ * not a SuzyQ-recovery mechanism. SuzyQ re-flash works regardless via
+ * `gale power off` + the documented procedure (see
+ * docs/keeping-suzyq-recovery-working.md). Bounded retries just make
+ * the failure state quiet rather than chatty.
  */
 #define IPQ4019_ETH_INIT_MAX_RETRIES 3
 static void ipq4019_net_poller(struct NetPoller *poller)
@@ -504,8 +507,7 @@ static void ipq4019_net_poller(struct NetPoller *poller)
 		return;
 	if (retry_count >= IPQ4019_ETH_INIT_MAX_RETRIES) {
 		printf("ipq4019: eth_init failed %d times — giving up "
-		       "(driver halted, SuzyQ bus should now be accessible)\n",
-		       retry_count);
+		       "(driver halted)\n", retry_count);
 		gave_up = 1;
 		return;
 	}

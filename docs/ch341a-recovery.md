@@ -88,10 +88,13 @@ vendor="Winbond" name="W25Q64BV/W25Q64CV/W25Q64FV"
 
 ## Step 2 — Read back the current contents (for forensics)
 
-Before writing, capture what's currently on the chip. This is the
-post-deadlock state — useful if we ever want to reconstruct what
-happened, and a safety net in case the user changes their mind about
-restoring.
+Before writing, capture what's currently on the chip. Useful if you want
+to reconstruct what happened, and a safety net in case you change your
+mind about restoring.
+
+(CH341A talks directly to the SPI flash and has its own JEDEC ID
+detection, so passing `-c` is fine here — unlike the EC bridge, which
+needs SFDP and rejects `-c`.)
 
 ```
 sudo flashrom -p ch341a_spi \

@@ -99,14 +99,19 @@ via Ctrl+N.)
    ```bash
    picocom -b 115200 /dev/ttyUSB0      # (verify which index, which baud)
    ```
-2. **Back up the entire SPI flash before writing anything.** Try the in-system path
-   first (raiden over SuzyQ via the EC bridge), fall back to a CH341A + SOIC clip on
-   the W25Q64:
+2. **Back up the entire SPI flash before writing anything.** Use the
+   in-system SuzyQ path via the EC bridge (the correct procedure: atomic
+   `gale power off` + flashrom with **no** `-c` and **no** `target=`;
+   `target=AP` STALLs on this EC, and `-c` forces RDID matching which
+   the EC bridge doesn't support — see
+   `/home/tim/local/gwifi/gale-spi-flash-backup.md`):
    ```bash
-   sudo flashrom -p raiden_debug_spi:target=AP -r gale-stock-backup.bin   # (verify)
-   # fallback: sudo flashrom -p ch341a_spi -r gale-stock-backup.bin
+   uv run --no-project python tmp/con.py "gale power off"
+   sudo flashrom -p raiden_debug_spi -r gale-stock-backup.bin
    sha256sum gale-stock-backup.bin                                        # record it
    ```
+   CH341A is the emergency-only fallback (see `docs/ch341a-recovery.md`);
+   you should not need it for routine backups.
 3. Identify the flashmap RW region that holds the depthcharge payload
    (`RW_SECTION_A`/`RW_FW_MAIN_A`) with `dump_fmap gale-stock-backup.bin`.
 
@@ -125,8 +130,11 @@ coreboot untouched, then power-cycle and watch the console.
 ```bash
 # Splice build/dev.payload (or netboot) into the RW_SECTION of a flash image,
 # or use cbfstool/futility per the flashmap from 0.4, then:
-sudo flashrom -p raiden_debug_spi:target=AP -w gale-modified.bin \
-    --fmap -i RW_SECTION_A                         # (verify region name/flow)
+uv run --no-project python tmp/con.py "gale power off"
+sudo flashrom -p raiden_debug_spi -w gale-modified.bin \
+    --fmap -i RW_SECTION_A
+# No -c, no target=, no separate --flash-name probe — see
+# docs/keeping-suzyq-recovery-working.md for the rationale.
 ```
 
 **Step: flash → power-cycle → observe**
