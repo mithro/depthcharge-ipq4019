@@ -459,6 +459,63 @@ static int ipq4019_eth_write_hwaddr(IpqEdmaDev *p)
 #define GCC_ESS_BCR_BLK_ARES		(1 << 0)
 
 /*
+ * IPQ4019 TLMM (pin mux) register layout (per coreboot soc/qualcomm/ipq40xx/
+ * include/soc/iomap.h and gpio.h):
+ *
+ *   TLMM_BASE = 0x01000000
+ *   Each GPIO has a 4-KiB control page at TLMM_BASE + (gpio * 0x1000):
+ *     +0 GPIO_CFG  bits[1:0]=pull (0=NO,1=DOWN,2=UP), [5:2]=func (0=GPIO,
+ *                                                                1=alt1...),
+ *                   [8:6]=drive strength (0..7 -> 2..16 mA), [9]=output-enable.
+ *     +4 GPIO_IN_OUT  bit[1]=output value (when OE=1); bit[0]=input value.
+ *
+ * Gale wiring (from OpenWrt qcom-ipq4019-wifi.dts, `mdio_pinmux` node):
+ *   gpio6  -> function "mdio" (function index 1 in pinctrl-ipq4019.c)
+ *   gpio7  -> function "mdc"  (function index 1)
+ *   gpio40 -> GPIO output driven high (board-level QCA8075 enable/strap)
+ *
+ * Coreboot's gale board does NOT apply this pinmux — the production OpenWrt
+ * kernel does via its DT pinctrl property. So the depthcharge driver MUST
+ * apply it itself, or MDC/MDIO lines never leave the SoC and every PHY read
+ * returns 0x0000 (the float reads as zero through the MDIO controller).
+ */
+#define IPQ4019_TLMM_BASE		0x01000000
+#define TLMM_GPIO_CFG(n)		((void *)(IPQ4019_TLMM_BASE + 0x1000 * (n)))
+#define TLMM_GPIO_IN_OUT(n)		((void *)(IPQ4019_TLMM_BASE + 0x1000 * (n) + 4))
+
+/* GPIO_CFG fields (pull[1:0], func[5:2], drv[8:6], oe[9]). */
+static uint32_t tlmm_cfg(uint32_t pull, uint32_t func,
+			  uint32_t drv, uint32_t oe)
+{
+	return (pull & 0x3) | ((func & 0xf) << 2) | ((drv & 0x7) << 6)
+	       | ((oe & 0x1) << 9);
+}
+
+static void ipq4019_mdio_pinmux_init(void)
+{
+	uint32_t cfg6_pre  = readl(TLMM_GPIO_CFG(6));
+	uint32_t cfg7_pre  = readl(TLMM_GPIO_CFG(7));
+	uint32_t cfg40_pre = readl(TLMM_GPIO_CFG(40));
+
+	printf("ipq4019: TLMM pre-pinmux  gpio6=0x%08x gpio7=0x%08x gpio40=0x%08x\n",
+	       cfg6_pre, cfg7_pre, cfg40_pre);
+
+	/* gpio6 -> "mdio" (func 1), no pull, 8 mA, no GPIO-OE (peripheral
+	 * controls direction). */
+	writel(tlmm_cfg(0, 1, 3, 0), TLMM_GPIO_CFG(6));
+	/* gpio7 -> "mdc" (func 1), no pull, 8 mA, no GPIO-OE. */
+	writel(tlmm_cfg(0, 1, 3, 0), TLMM_GPIO_CFG(7));
+	/* gpio40 -> GPIO function (0), output enabled, no pull, 8 mA. */
+	writel(tlmm_cfg(0, 0, 3, 1), TLMM_GPIO_CFG(40));
+	/* Drive gpio40 HIGH (output value at bit 1 of IN_OUT). */
+	writel(1 << 1, TLMM_GPIO_IN_OUT(40));
+
+	printf("ipq4019: TLMM post-pinmux gpio6=0x%08x gpio7=0x%08x gpio40=0x%08x out40=0x%08x\n",
+	       readl(TLMM_GPIO_CFG(6)), readl(TLMM_GPIO_CFG(7)),
+	       readl(TLMM_GPIO_CFG(40)), readl(TLMM_GPIO_IN_OUT(40)));
+}
+
+/*
  * Per-port async reset bits live at GCC offset 0x1200C:
  *   bit 0 = GCC_ESS_MAC1_ARES,  bit 1 = MAC2_ARES,
  *   bit 2 = MAC3_ARES,          bit 3 = MAC4_ARES,
@@ -520,6 +577,9 @@ static int ipq4019_eth_init(void)
 	printf("ipq4019: MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
 	       p->mac_addr.addr[0], p->mac_addr.addr[1], p->mac_addr.addr[2],
 	       p->mac_addr.addr[3], p->mac_addr.addr[4], p->mac_addr.addr[5]);
+
+	ipq4019_mdio_pinmux_init();
+	printf("ipq4019: MDIO pinmux initialized\n");
 
 	ipq4019_ess_clock_and_reset_init();
 	printf("ipq4019: ESS clock+reset initialized\n");

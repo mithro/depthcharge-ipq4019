@@ -71,18 +71,20 @@ static void esw_port_loopback_set_all(int enable)
 static void qca8075_ess_reset(void)
 {
 	int i, val;
+	static int probe_done;
 
-	/* DIAGNOSTIC: probe PHY IDs via MDIO at each address. QCA8075 reports
-	 * JEDEC ID at reg 2 (low 16 bits of the OUI). If MDIO is working we
-	 * expect 0x004D-ish from the QCA chip; 0xffff = MDIO returns floating
-	 * bus, 0x0000 = MDIO clock dead. Helps diagnose the PLL_VCO_CALIB
-	 * Not Ready case at top of the calibration. */
-	for (i = 0; i <= IPQ4019_PHY_PSGMII_ADDR; i++) {
-		uint16_t id1 = 0xdead, id2 = 0xdead;
-		ipq4019_mdio_read(i, 2, &id1);
-		ipq4019_mdio_read(i, 3, &id2);
-		printf("ipq4019: MDIO addr %d  id_hi=0x%04x id_lo=0x%04x\n",
-		       i, id1, id2);
+	/* DIAGNOSTIC (first call only): probe PHY IDs via MDIO at each
+	 * address. QCA8075 ports report OUI 0x004DD0B2 at MDIO regs 2/3;
+	 * PSGMII PHY at addr 5 reports a different ID. */
+	if (!probe_done) {
+		for (i = 0; i <= IPQ4019_PHY_PSGMII_ADDR; i++) {
+			uint16_t id1 = 0xdead, id2 = 0xdead;
+			ipq4019_mdio_read(i, 2, &id1);
+			ipq4019_mdio_read(i, 3, &id2);
+			printf("ipq4019: MDIO addr %d  id_hi=0x%04x id_lo=0x%04x\n",
+			       i, id1, id2);
+		}
+		probe_done = 1;
 	}
 
 	/* Fix phy psgmii RX 20bit */
@@ -256,21 +258,29 @@ int ipq4019_psgmii_self_test(void)
 	uint32_t phy_mask = (1 << IPQ4019_NUM_PORT_PHY) - 1;
 	int i, result = 0;
 
-	/* PSGMII analog VCO/PLL calibration writes (PSGMII interface mode). */
+	printf("ipq4019: PSGMII analog cal start\n");
 	writel(PSGMIIPHY_PLL_VCO_VAL, psgmii + PSGMIIPHY_PLL_VCO_RELATED_CTRL);
 	writel(PSGMIIPHY_VCO_VAL, psgmii + PSGMIIPHY_VCO_CALIBRATION_CTRL_REGISTER_1);
 	mdelay(10);
 	writel(PSGMIIPHY_VCO_RST_VAL, psgmii + PSGMIIPHY_VCO_CALIBRATION_CTRL_REGISTER_1);
 
+	printf("ipq4019: psgmii_st_phy_prepare 5 ports\n");
 	for (i = 0; i < IPQ4019_NUM_PORT_PHY; i++)
 		psgmii_st_phy_prepare(i);
 
+	printf("ipq4019: PSGMII self-test loop (up to %d tries)\n", PSGMII_ST_NUM_RETRIES);
 	for (i = 0; i < PSGMII_ST_NUM_RETRIES; i++) {
+		printf("ipq4019: try %d/%d  ess_reset ...\n", i + 1, PSGMII_ST_NUM_RETRIES);
 		qca8075_ess_reset();
 		esw_port_loopback_set_all(1);
+		printf("ipq4019: try %d  serial test ...\n", i + 1);
 		result = psgmii_st_run_test_serial(phy_mask);
-		if (result)
+		printf("ipq4019: try %d  serial result %d\n", i + 1, result);
+		if (result) {
+			printf("ipq4019: try %d  parallel test ...\n", i + 1);
 			result = psgmii_st_run_test_parallel(phy_mask);
+			printf("ipq4019: try %d  parallel result %d\n", i + 1, result);
+		}
 		if (result)
 			break;
 	}
