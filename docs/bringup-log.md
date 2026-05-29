@@ -24,7 +24,7 @@ SuzyQ (2026-05-28). Corrects/extends `hardware.md`.
 - Read: `gale power off && sudo flashrom -p raiden_debug_spi -r f` — **no `target=`**,
   **system flashrom 1.3.0** (SFDP). Verified == stock.
 - `FW_MAIN_A`/`RW_SECTION_A/B` (≥0x400000) are **outside WP_RO** → writable with the
-  AP off, no WP deassert. `COREBOOT`/WP_RO needs WP deasserted (flaky on this EC).
+  AP off, no WP deassert. `COREBOOT`/WP_RO needs WP deasserted via `gpioset WP_L 1` from the EC.
 - The flash is only accessible when the **AP CPU is OFF** (`VDD_1P1_CPU_EN=0`) **and**
   recently powered (the EC powers the flash for the bridge). A **crashed/hung AP**
   holds the SPI bus → reads return all-`0x00`. A degraded flash state (after many

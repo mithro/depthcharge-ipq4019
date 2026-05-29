@@ -72,6 +72,19 @@ static void qca8075_ess_reset(void)
 {
 	int i, val;
 
+	/* DIAGNOSTIC: probe PHY IDs via MDIO at each address. QCA8075 reports
+	 * JEDEC ID at reg 2 (low 16 bits of the OUI). If MDIO is working we
+	 * expect 0x004D-ish from the QCA chip; 0xffff = MDIO returns floating
+	 * bus, 0x0000 = MDIO clock dead. Helps diagnose the PLL_VCO_CALIB
+	 * Not Ready case at top of the calibration. */
+	for (i = 0; i <= IPQ4019_PHY_PSGMII_ADDR; i++) {
+		uint16_t id1 = 0xdead, id2 = 0xdead;
+		ipq4019_mdio_read(i, 2, &id1);
+		ipq4019_mdio_read(i, 3, &id2);
+		printf("ipq4019: MDIO addr %d  id_hi=0x%04x id_lo=0x%04x\n",
+		       i, id1, id2);
+	}
+
 	/* Fix phy psgmii RX 20bit */
 	ipq4019_mdio_write(psgmii_phy, MII_BMCR, 0x005b);
 	/* Reset phy psgmii */
@@ -86,7 +99,8 @@ static void qca8075_ess_reset(void)
 		mdelay(1);
 	}
 	if (i >= 100)
-		printf("ipq4019: QCA807x PSGMII PLL_VCO_CALIB Not Ready\n");
+		printf("ipq4019: QCA807x PSGMII PLL_VCO_CALIB Not Ready "
+		       "(last MMD/PMAPMD reg 0x28 read = 0x%04x)\n", val);
 
 	/* Freeze phy psgmii RX CDR */
 	ipq4019_mdio_write(psgmii_phy, 0x1a, 0x2230);

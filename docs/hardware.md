@@ -110,7 +110,7 @@ trick (or align/pad rings so per-descriptor flush is safe).
 ## 5. PSGMII calibration / self-test (the risk)
 
 The PSGMII SerDes between EDMA and the QCA8075 must be calibrated or links are
-flaky/absent. U-Boot's `psgmii_self_test()` (chosen to port **faithfully**):
+unreliable/absent. U-Boot's `psgmii_self_test()` (chosen to port **faithfully**):
 
 - `psgmii_st_phy_prepare()` each port PHY (select copper page, power down, set
   packet count `0x8021`=4096 / size `0x8062`=1504 via MMD-AN, fix MDI).
