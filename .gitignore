@@ -32,3 +32,5 @@
 /tmp/tftproot/
 /tmp/*.log
 /tmp/*.leases
+/tmp/*.pcap
+/tmp/*.pid

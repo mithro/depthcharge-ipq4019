@@ -483,36 +483,34 @@ static int ipq4019_phy_check_link(NetDevice *dev, int *ready)
 	IpqEdmaDev *p = dev->dev_data;
 	int i;
 	static int link_logged;
+	uint16_t v[IPQ4019_NUM_PORT_PHY] = {0};
 
 	if (!p->started)
 		ipq4019_eth_start(p);
 
 	*ready = 0;
 	for (i = 0; i < IPQ4019_NUM_PORT_PHY; i++) {
-		uint16_t v = 0;
-		ipq4019_mdio_read(i, QCA807X_PHY_SPECIFIC, &v);
-		if (v & QCA807X_PHY_SPECIFIC_LINK) {
+		ipq4019_mdio_read(i, QCA807X_PHY_SPECIFIC, &v[i]);
+		if (v[i] & QCA807X_PHY_SPECIFIC_LINK)
 			*ready = 1;
-			if (!link_logged) {
-				/* QCA807X_PHY_SPECIFIC (0x11) bits:
-				 *   [15:14] = speed (00=10M, 01=100M, 10=1000M)
-				 *   [13] = duplex (1=full)
-				 *   [10] = link up
-				 */
-				const char *spd = "??";
-				switch ((v >> 14) & 3) {
-				case 0: spd = "10M"; break;
-				case 1: spd = "100M"; break;
-				case 2: spd = "1G"; break;
-				}
-				printf("ipq4019: link up on PHY %d, %s/%s "
-				       "(PHY_SPECIFIC=0x%04x)\n",
-				       i, spd, (v & 0x2000) ? "full" : "half",
-				       v);
-				link_logged = 1;
+	}
+
+	/* Log ALL link states once any port comes up. */
+	if (*ready && !link_logged) {
+		for (i = 0; i < IPQ4019_NUM_PORT_PHY; i++) {
+			const char *spd = "??";
+			switch ((v[i] >> 14) & 3) {
+			case 0: spd = "10M"; break;
+			case 1: spd = "100M"; break;
+			case 2: spd = "1G"; break;
 			}
-			break;
+			printf("ipq4019: PHY %d  %s  %s/%s  PHY_SPECIFIC=0x%04x\n",
+			       i, (v[i] & QCA807X_PHY_SPECIFIC_LINK) ?
+				   "LINK_UP" : "no_link",
+			       spd, (v[i] & 0x2000) ? "full" : "half",
+			       v[i]);
 		}
+		link_logged = 1;
 	}
 	return 0;
 }
