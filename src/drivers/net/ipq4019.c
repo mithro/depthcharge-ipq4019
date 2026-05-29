@@ -328,6 +328,13 @@ static int ipq4019_eth_send(NetDevice *dev, void *packet, uint16_t length)
 		len -= EDMA_TPD_MIN_BYTES;
 	}
 
+	/* DSB SY: drain the CPU store buffer so the TPD field stores above
+	 * are committed before the cache flush + doorbell. Matches `wmb()` in
+	 * U-Boot's ipq40xx_eth_send (essedma.c:927); without this barrier the
+	 * partial/stale TPD lines get written back to RAM, EDMA reads garbage
+	 * addr/len, increments cons==prod, but never actually emits a frame. */
+	asm volatile("dsb sy" ::: "memory");
+
 	flush_range(first, EDMA_TPDS_PER_PACKET * sizeof(edma_tpd));
 	writel(p->tpd_head, p->base + EDMA_REG_TPD_IDX_Q(EDMA_TXQ_ID));
 
@@ -344,6 +351,42 @@ static int ipq4019_eth_send(NetDevice *dev, void *packet, uint16_t length)
 
 	{
 		static int n_tx;
+		if (n_tx == 0) {
+			/* Switch port status + lookup-ctrl dump. */
+			int sp;
+			for (sp = 0; sp < ESS_PORTS_NUM; sp++) {
+				printf("ipq4019: PORT%d_STATUS=0x%08x  LOOKUP_CTRL=0x%08x\n",
+				       sp,
+				       readl(p->esw + 0x7c + sp * 0x4),
+				       readl(p->esw + ESS_PORT_LOOKUP_CTRL(sp)));
+			}
+			printf("ipq4019: FW_CTRL1=0x%08x\n",
+			       readl(p->esw + ESS_GLOBAL_FW_CTRL1));
+			/* One-shot EDMA register state dump on first TX. */
+			printf("ipq4019: TPD_BASE     = 0x%08x  (want 0x%08x)\n",
+			       readl(p->base + EDMA_REG_TPD_BASE_ADDR_Q(EDMA_TXQ_ID)),
+			       (uint32_t)virt_to_phys(p->tpd_ring));
+			printf("ipq4019: TPD_RING_SZ  = 0x%08x  (want %d)\n",
+			       readl(p->base + EDMA_REG_TPD_RING_SIZE),
+			       NO_OF_TX_DESC);
+			printf("ipq4019: TXQ_CTRL     = 0x%08x  (TXQ_EN bit 0x20)\n",
+			       readl(p->base + EDMA_REG_TXQ_CTRL));
+			printf("ipq4019: RXQ_CTRL     = 0x%08x  (RXQ_EN 0xff00)\n",
+			       readl(p->base + EDMA_REG_RXQ_CTRL));
+			printf("ipq4019: TX_SRAM_PART = 0x%08x  (LOAD_PTR bit 0x%x)\n",
+			       readl(p->base + EDMA_REG_TX_SRAM_PART),
+			       1 << EDMA_LOAD_PTR_SHIFT);
+			printf("ipq4019: TPD_IDX_Q    = 0x%08x  prod=0x%x cons=0x%x\n",
+			       readl(p->base + EDMA_REG_TPD_IDX_Q(EDMA_TXQ_ID)),
+			       readl(p->base + EDMA_REG_TPD_IDX_Q(EDMA_TXQ_ID)) & EDMA_TPD_PROD_IDX_MASK,
+			       (readl(p->base + EDMA_REG_TPD_IDX_Q(EDMA_TXQ_ID)) >> EDMA_TPD_CONS_IDX_SHIFT) & EDMA_TPD_CONS_IDX_MASK);
+			/* TPD content of first descriptor (the one we just wrote) */
+			printf("ipq4019: first TPD virt=%p phys=0x%08x len=%d addr=0x%08x "
+			       "word1=0x%08x word3=0x%08x\n",
+			       first, (uint32_t)virt_to_phys(first),
+			       first->len, first->addr,
+			       first->word1, first->word3);
+		}
 		if (n_tx < 3) {
 			uint32_t r = readl(p->base + EDMA_REG_TPD_IDX_Q(EDMA_TXQ_ID));
 			/* Per-port MIB counters live at ess_base + 0x1000 +
@@ -632,25 +675,12 @@ static int ipq4019_eth_init(void)
 
 	ipq4019_mdio_init();
 
-	/*
-	 * PSGMII self-test calibration: empirically fails on gale (every
-	 * `psgmii_st_run_test_serial` iteration returns 0 — packet counter
-	 * never reaches 4096). Theory: the loopback packet generator the
-	 * test relies on requires switch-port forwarding state we haven't
-	 * configured yet (ess_switch_init runs AFTER this), or the PBL has
-	 * already calibrated the PSGMII SerDes and the U-Boot self-test
-	 * approach isn't a prerequisite on gale.
-	 *
-	 * For now, run the test as a diagnostic but don't gate on its
-	 * result — continue with switch/EDMA bring-up so we can find out
-	 * empirically whether link comes up without the explicit cal pass.
-	 * If it does, we know cal is either unneeded or already done by an
-	 * earlier stage.
-	 */
-	if (ipq4019_psgmii_self_test())
-		printf("ipq4019: PSGMII cal didn't converge — continuing anyway\n");
-	else
-		printf("ipq4019: PSGMII cal passed\n");
+	/* v15: SKIP PSGMII calibration entirely. Each qca8075_ess_reset
+	 * BCR-toggles the WHOLE ESS block, which resets switch + EDMA +
+	 * MDIO state we'd then have to redo. Test whether PBL leaves the
+	 * SerDes in a usable state. */
+	printf("ipq4019: PSGMII cal SKIPPED (static config test)\n");
+
 	ess_switch_init(p);
 
 	if (edma_alloc_rings(p)) {
