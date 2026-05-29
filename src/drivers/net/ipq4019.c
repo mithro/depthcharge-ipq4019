@@ -585,17 +585,26 @@ static int ipq4019_eth_init(void)
 	printf("ipq4019: ESS clock+reset initialized\n");
 
 	ipq4019_mdio_init();
-	if (ipq4019_psgmii_self_test()) {
-		/*
-		 * PSGMII calibration did not converge — the SerDes is in an
-		 * indeterminate state and no PHY will get link. Return -1 so
-		 * the NetPoller retries eth_init on the next poll (the poller
-		 * left `initted` 0 in that case). One transient miscalibration
-		 * isn't fatal; we'll try again.
-		 */
-		printf("ipq4019: PSGMII calibration failed; will retry\n");
-		return -1;
-	}
+
+	/*
+	 * PSGMII self-test calibration: empirically fails on gale (every
+	 * `psgmii_st_run_test_serial` iteration returns 0 — packet counter
+	 * never reaches 4096). Theory: the loopback packet generator the
+	 * test relies on requires switch-port forwarding state we haven't
+	 * configured yet (ess_switch_init runs AFTER this), or the PBL has
+	 * already calibrated the PSGMII SerDes and the U-Boot self-test
+	 * approach isn't a prerequisite on gale.
+	 *
+	 * For now, run the test as a diagnostic but don't gate on its
+	 * result — continue with switch/EDMA bring-up so we can find out
+	 * empirically whether link comes up without the explicit cal pass.
+	 * If it does, we know cal is either unneeded or already done by an
+	 * earlier stage.
+	 */
+	if (ipq4019_psgmii_self_test())
+		printf("ipq4019: PSGMII cal didn't converge — continuing anyway\n");
+	else
+		printf("ipq4019: PSGMII cal passed\n");
 	ess_switch_init(p);
 
 	if (edma_alloc_rings(p)) {
