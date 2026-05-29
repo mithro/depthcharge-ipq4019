@@ -25,7 +25,7 @@
 #define EDMA_TXQ_ID		0
 #define EDMA_RXQ_ID		0
 #define NO_OF_TX_DESC		IPQ4019_EDMA_TX_RING_SIZE	/* 8 */
-#define NO_OF_RX_DESC		128
+#define NO_OF_RX_DESC		512
 #define EDMA_RX_BUF_SIZE	2048		/* RRD(16) + frame, cache-aligned */
 
 /* One TPD suffices for a packet, but a cache line is bigger than one 16-byte
@@ -423,6 +423,7 @@ static int ipq4019_eth_recv(NetDevice *dev, void *buf, uint16_t *len, int maxlen
 	uint8_t *rx_pkt;
 	edma_rrd *rrd;
 	uint16_t length;
+	static int rx_count, rx_invalid, rx_too_big;
 
 	*len = 0;
 
@@ -435,12 +436,24 @@ static int ipq4019_eth_recv(NetDevice *dev, void *buf, uint16_t *len, int maxlen
 	invalidate_range(rx_pkt, EDMA_RX_BUF_SIZE);
 	rrd = (edma_rrd *)rx_pkt;
 
-	if (!(rrd->rrd7 & EDMA_RRD7_DESC_VALID))
+	if (!(rrd->rrd7 & EDMA_RRD7_DESC_VALID)) {
+		rx_invalid++;
+		if (rx_invalid <= 5)
+			printf("ipq4019: RX %d invalid (rrd7=0x%04x)\n",
+			       rx_invalid, rrd->rrd7);
 		return 0;
+	}
 
 	length = rrd->rrd6;
-	if (length > maxlen)
+	if (length > maxlen) {
+		rx_too_big++;
 		length = maxlen;
+	}
+	rx_count++;
+	if (rx_count <= 5 || (rx_count % 100) == 0)
+		printf("ipq4019: RX #%d len=%d rrd7=0x%04x rrd6=0x%04x invalid=%d too_big=%d\n",
+		       rx_count, length, rrd->rrd7, rrd->rrd6,
+		       rx_invalid, rx_too_big);
 	memcpy(buf, rx_pkt + EDMA_RRD_SIZE, length);
 	*len = length;
 
