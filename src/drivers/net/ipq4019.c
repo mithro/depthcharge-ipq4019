@@ -434,6 +434,74 @@ static int ipq4019_eth_write_hwaddr(IpqEdmaDev *p)
 	return 0;
 }
 
+/*
+ * ESS clock + block-reset (GCC pokes).
+ *
+ * Coreboot's gale build does NOT enable GCC_ESS_CLK (verified by grep across
+ * coreboot/src/soc/qualcomm/ipq40xx/clock.c and coreboot/src/mainboard/google/
+ * gale/ — only USB/UART/NAND/BLSP clocks are touched). Without the ESS clock
+ * gated on, MDIO reads return 0x0000 for every PHY address: the MDIO state
+ * machine has no clock to run.
+ *
+ * Mirror U-Boot's essedma_probe() ordering (clk_enable -> ess_reset):
+ *   1. Enable GCC_ESS_CBCR (offset 0x12010, bit 0).
+ *   2. Toggle GCC_ESS_BCR (offset 0x12008, bit 0): assert 10 ms, deassert 10 ms.
+ *
+ * Register offsets cross-checked against mainline Linux
+ * drivers/clk/qcom/gcc-ipq4019.c. The BCR offset matches the existing
+ * ess_reset() in ipq4019_psgmii.c (which is still called inside the PSGMII
+ * calibration loop and serves the analog-SerDes-reset role there).
+ */
+#define IPQ4019_GCC_BASE		0x01800000
+#define GCC_ESS_CBCR_OFFSET		0x12010
+#define GCC_ESS_BCR_OFFSET		0x12008
+#define GCC_ESS_CBCR_CLK_ENA		(1 << 0)
+#define GCC_ESS_BCR_BLK_ARES		(1 << 0)
+
+/*
+ * Per-port async reset bits live at GCC offset 0x1200C:
+ *   bit 0 = GCC_ESS_MAC1_ARES,  bit 1 = MAC2_ARES,
+ *   bit 2 = MAC3_ARES,          bit 3 = MAC4_ARES,
+ *   bit 4 = MAC5_ARES,          bit 5 = GCC_ESS_PSGMII_ARES.
+ * Per mainline Linux drivers/clk/qcom/gcc-ipq4019.c lines 1690-1695.
+ * If any of these are stuck asserted, the corresponding MAC/PSGMII PHY
+ * won't respond to MDIO.
+ */
+#define GCC_ESS_PORT_ARES_OFFSET		0x1200C
+
+static void ipq4019_ess_clock_and_reset_init(void)
+{
+	void *cbcr = (void *)(IPQ4019_GCC_BASE + GCC_ESS_CBCR_OFFSET);
+	void *bcr  = (void *)(IPQ4019_GCC_BASE + GCC_ESS_BCR_OFFSET);
+	void *pares = (void *)(IPQ4019_GCC_BASE + GCC_ESS_PORT_ARES_OFFSET);
+	uint32_t v;
+
+	printf("ipq4019: GCC_ESS_CBCR pre-enable    = 0x%08x\n", readl(cbcr));
+	printf("ipq4019: GCC_ESS_BCR  pre-toggle    = 0x%08x\n", readl(bcr));
+	printf("ipq4019: GCC_ESS_PORT_ARES initial   = 0x%08x\n", readl(pares));
+
+	v = readl(cbcr);
+	writel(v | GCC_ESS_CBCR_CLK_ENA, cbcr);
+	mdelay(10);
+	printf("ipq4019: GCC_ESS_CBCR post-enable   = 0x%08x\n", readl(cbcr));
+
+	/* BCR is a 1-bit reset toggle. */
+	writel(GCC_ESS_BCR_BLK_ARES, bcr);
+	mdelay(10);
+	writel(0, bcr);
+	mdelay(10);
+	printf("ipq4019: GCC_ESS_BCR  post-toggle   = 0x%08x\n", readl(bcr));
+
+	/* Clear any stuck per-port resets (MAC1..5 + PSGMII). */
+	v = readl(pares);
+	if (v) {
+		printf("ipq4019: clearing per-port resets, was 0x%08x\n", v);
+		writel(0, pares);
+		mdelay(10);
+	}
+	printf("ipq4019: GCC_ESS_PORT_ARES final    = 0x%08x\n", readl(pares));
+}
+
 /* ---- one-time bring-up ---- */
 static int ipq4019_eth_init(void)
 {
@@ -450,6 +518,9 @@ static int ipq4019_eth_init(void)
 	printf("ipq4019: MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
 	       p->mac_addr.addr[0], p->mac_addr.addr[1], p->mac_addr.addr[2],
 	       p->mac_addr.addr[3], p->mac_addr.addr[4], p->mac_addr.addr[5]);
+
+	ipq4019_ess_clock_and_reset_init();
+	printf("ipq4019: ESS clock+reset initialized\n");
 
 	ipq4019_mdio_init();
 	if (ipq4019_psgmii_self_test()) {

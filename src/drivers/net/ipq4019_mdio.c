@@ -93,8 +93,26 @@ void ipq4019_phy_write_mmd(uint8_t phy, uint8_t devad, uint16_t reg, uint16_t va
 
 void ipq4019_mdio_init(void)
 {
-	uint32_t mode = readl(mdio_base + MDIO_MODE_REG);
+	uint32_t mode_pre = readl(mdio_base + MDIO_MODE_REG);
+	uint32_t cmd_pre  = readl(mdio_base + MDIO_CMD_REG);
+	uint32_t mode_post;
 
-	mode &= ~MDIO_MODE_C45;		/* clause 22 */
-	writel(mode, mdio_base + MDIO_MODE_REG);
+	printf("ipq4019_mdio: MDIO_MODE pre  = 0x%08x  CMD pre  = 0x%08x\n",
+	       mode_pre, cmd_pre);
+
+	/* Force clause-22 by clearing the C45 bit. */
+	writel(mode_pre & ~MDIO_MODE_C45, mdio_base + MDIO_MODE_REG);
+	mode_post = readl(mdio_base + MDIO_MODE_REG);
+
+	printf("ipq4019_mdio: MDIO_MODE post = 0x%08x  (writeback %s)\n",
+	       mode_post,
+	       (mode_post == (mode_pre & ~MDIO_MODE_C45)) ? "MATCHES" :
+	       (mode_post == 0xffffffff) ? "all-1s (bus fault?)" :
+	       (mode_post == 0) ? "all-0s (controller dead?)" : "MISMATCH");
+
+	/* Probe MDIO_ADDR_REG roundtrip as another liveness check. */
+	writel(0x1234, mdio_base + MDIO_ADDR_REG);
+	uint32_t addr_back = readl(mdio_base + MDIO_ADDR_REG);
+	printf("ipq4019_mdio: MDIO_ADDR write=0x1234 read=0x%08x  %s\n",
+	       addr_back, (addr_back == 0x1234) ? "MATCHES" : "MISMATCH");
 }
