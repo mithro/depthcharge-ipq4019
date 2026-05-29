@@ -268,3 +268,50 @@ remains the only recovery path.
 The UCSI capability **does** simplify future bring-up post-recovery —
 the recipe at `docs/post-recovery-recipe.md` can use
 `tmp/ucsi_hardcycle.py` instead of asking the user to physically replug.
+
+---
+
+## Correction (2026-05-29): the "SuzyQ broken" conclusion above was wrong
+
+The earlier conclusion "SuzyQ-side recovery on this gale is no longer
+feasible" was procedural failure on my part, not a hardware/architectural
+limit. After the CH341A restore to v3, SuzyQ was tested with the procedure
+documented in `/home/tim/local/gwifi/gale-spi-flash-backup.md`:
+
+- Read: `gale power off && sudo flashrom -p raiden_debug_spi -r dump.bin`
+- Write: `gale power off && sudo flashrom -p raiden_debug_spi -w v3.bin --fmap -i FW_MAIN_B`
+
+Both succeeded (exit=0, 43 s read, 42 s erase+write+verify). All static
+regions in the read matched v3.bin byte-for-byte (`tmp/verify_regions.py`).
+
+### Three procedural mistakes that produced the false conclusion
+
+1. **`-c W25Q64BV/W25Q64CV/W25Q64FV`**. The EC bridge does not surface a
+   database-matched JEDEC ID; flashrom must detect via SFDP (`Unknown flash
+   chip "SFDP-capable chip"`). With `-c` set, RDID returns garbage and
+   flashrom aborts with `RDID byte 0 parity violation` / `No EEPROM/flash
+   device found`. Every "SuzyQ broken" probe in this log used `-c`.
+2. **Pre-flight `flashrom --flash-name` probes before the real operation.**
+   flashrom's raiden_debug_spi cleanup re-enables AP power on exit; the
+   subsequent write then races a re-powered AP. Use a single atomic
+   `gale power off && flashrom -w …`.
+3. **Re-running flashrom after a prior flashrom left the AP powered.** Same
+   root cause as (2).
+
+### What this means about the rest of this log
+
+- The "degraded flash state" / "physical VCC power-cycle required" framing
+  is unfounded. The flash chip was responding correctly all along — my
+  probes were just unable to read its response.
+- The "AP off + flash on isn't achievable" / "IPQ pads float/leak" hypothesis
+  (line 108) is unfounded. `gale power off` from a running AP cleanly
+  produces CPU off + flash powered + AP idle (verified via gpioget at
+  2026-05-29 14:30 local).
+- The choice to use CH341A was correct as **emergency recovery once SPI was
+  thought wedged**, but a careful application of the documented SuzyQ
+  procedure would have avoided all three CH341A flashes in this session.
+
+The authoritative SuzyQ procedure lives in
+`/home/tim/local/gwifi/gale-spi-flash-backup.md`. The doc
+`docs/keeping-suzyq-recovery-working.md` summarises the three mistakes and
+the correct procedure.

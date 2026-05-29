@@ -3,97 +3,192 @@
 
 ## TL;DR
 
-**SuzyQ flash on the gale is NOT a reliable software-only recovery mechanism**
-once the chip carries non-stock firmware. This document records the rules and
-procedures that maximise your chance of avoiding the emergency state where
-CH341A becomes necessary — but it cannot guarantee SuzyQ alone is sufficient.
+SuzyQ flashing on the gale **works reliably**. The procedure is small and
+already documented in `/home/tim/local/gwifi/gale-spi-flash-backup.md`:
 
-**Bring a CH341A SOIC-8 clip + 3.3 V programmer to every gale session.** Use
-SuzyQ when it works (typically with stock firmware) and accept CH341A is the
-deterministic recovery for any custom-RW state.
+```
+echo "gale power off" > /dev/ttyUSB0           # EC console
+sudo flashrom -p raiden_debug_spi -r dump.bin  # NO -c, NO target=, atomic
+```
+
+If SuzyQ "doesn't work" for you, the cause is almost always one of three
+procedural mistakes documented below — not the device.
+
+CH341A is the **emergency** fallback only. Reaching for the CH341A means you
+broke something that the SuzyQ + EC bridge should have handled.
 
 ---
 
 ## Why this matters
 
-The gale's SPI flash (Winbond W25Q64FV at U45) is a single physical chip
-electrically shared between the IPQ4019 SoC's QUP SPI master and the EC's
-"raiden_debug_spi" bridge that the SuzyQ cable exposes. There's no hardware
-bus mux to disconnect the AP. So whenever the IPQ is actively using the bus,
-the EC's bridge can't reliably get clean access. With the device in stock
-firmware, the chrome-firmware stock recovery loop yields the bus briefly
-between iterations and SuzyQ writes succeed. With any non-stock RW firmware
-that doesn't exhibit the same yield pattern, SuzyQ reads return all-zeros
-("RDID byte 0 parity violation").
+The gale's SPI flash (Winbond W25Q64FV at U45) is the only path the device
+boots from. The SuzyQ cable + EC's `raiden_debug_spi` bridge is the in-band,
+no-disassembly way to read/write that chip. If you keep this path working,
+you can iterate on firmware without ever opening the case. If you break it,
+the only way back is a SOIC-8 clip + CH341A on the bare chip.
 
-## The single rule that gives the best SuzyQ recovery odds
+## The procedure (from `gale-spi-flash-backup.md`)
 
-**Never modify the `COREBOOT` region** (`0x000000–0x300000` of the chip).
+### Read
 
-`COREBOOT` is the WP_RO region. Stock RO depthcharge lives here. As long as
-it remains byte-identical to
-`/home/tim/local/gwifi/gale-spi-stock-2026-05-28.bin[0:0x300000]`, the device
-can always be force-booted into recovery mode (`gale rec on`) where the stock
-recovery loop runs from RO. From there, **on a stock-like chip**, the legacy
-flashrom procedure (`flash_rw.py`) has worked in this session. With dev keys
-in GBB and dev-signed VBLOCKs, the same procedure has failed — but we don't
-fully understand why, so keep COREBOOT intact regardless.
+```bash
+echo "gale power off" > /dev/ttyUSB0
+sudo flashrom -p raiden_debug_spi -r dump.bin
+```
 
-The pragmatic implication: if you're doing dev work, modify only
-`FW_MAIN_A` / `FW_MAIN_B` / `VBLOCK_A` / `VBLOCK_B` / `GBB rootkey` / `GBB
-flags`. Keep `COREBOOT` and `RW_NVRAM` stock.
+### Write (whole chip)
+
+```bash
+echo "gale power off" > /dev/ttyUSB0
+sudo flashrom -p raiden_debug_spi -w image.bin
+```
+
+### Write (single FMAP region — preferred for small diffs)
+
+```bash
+echo "gale power off" > /dev/ttyUSB0
+sudo flashrom -p raiden_debug_spi -w image.bin --fmap -i FW_MAIN_A
+```
+
+### Write a WP_RO region (COREBOOT, FMAP, GBB) — deassert WP first
+
+```bash
+echo "gpioset WP_L 1"   > /dev/ttyUSB0   # deassert WP via EC
+echo "gale power off"   > /dev/ttyUSB0
+sudo flashrom -p raiden_debug_spi -w image.bin --fmap -i GBB
+```
+
+## The three procedural mistakes that make it look broken
+
+### Mistake 1: passing `-c W25Q64BV/W25Q64CV/W25Q64FV` (or any `-c <chip>`)
+
+The EC's raiden_debug_spi bridge does NOT surface a database-matched JEDEC
+ID. The RDID (`0x9F`) response from the bridge is not a clean
+manufacturer-and-device-ID. Flashrom must detect the chip via **SFDP** and
+report it as `Unknown flash chip "SFDP-capable chip" (8192 kB, SPI)`.
+
+With `-c`, flashrom insists on JEDEC ID matching, RDID returns garbage, and
+you get:
+
+> `RDID byte 0 parity violation. compare_id: id1 0x00, id2 0x00`
+> `No EEPROM/flash device found.`
+
+**Fix:** drop the `-c` flag entirely. Let flashrom autodetect via SFDP.
+
+### Mistake 2: doing a separate `flashrom --flash-name` probe before the real operation
+
+flashrom's raiden_debug_spi programmer re-enables AP power on exit (the
+ENABLE control transfer's shutdown path drops the bridge and the EC's
+default response brings the AP back). So:
+
+```
+gale power off
+flashrom --flash-name           # AP off → probe OK, then AP re-powered on exit
+flashrom -w image.bin           # ❌ AP is running; bus contended; write fails
+```
+
+**Fix:** never probe separately. Use one atomic flashrom invocation per
+operation: `gale power off && flashrom -w image.bin`. If you want to verify
+the chip is reachable, do it implicitly — let the write itself fail noisily
+if it can't.
+
+### Mistake 3: assuming `gale power off` synchronously kills the IPQ
+
+`gale power off` from the EC is a sequenced power-down (CPU rail down,
+I/O rails settle, flash rail stays up). A previously-running IPQ holds the
+SPI bus until it is actually powered down. Issuing `gale power off`
+immediately followed by a flashrom probe is fine — flashrom's USB control
+transfer to the EC plus the EC's bridge takeover happen quickly enough that
+the IPQ's pads have tristated by the time SPI clocks start. But:
+
+```
+flashrom (forces AP on)
+gale power off                   # async; AP not actually idle yet
+flashrom -w ...                  # ❌ races AP power-down
+```
+
+**Fix:** ensure each flashrom call is preceded by `gale power off` (not by a
+prior flashrom call). One `gale power off` → one flashrom invocation.
+
+## Empirical evidence (2026-05-29)
+
+After the v3 image was flashed via CH341A and the device booted, the SuzyQ
+read + region-verify confirmed:
+
+| Region          | dump vs v3.bin | dump vs stock | notes                          |
+|-----------------|----------------|---------------|--------------------------------|
+| BOOT_STUB (3 MB)| match          | match         | COREBOOT pristine              |
+| FMAP            | match          | match         |                                |
+| GBB (256 KB)    | match          | differs       | dev rootkey replaces stock     |
+| RW_SECTION_A    | match          | differs       | netboot RW                     |
+| VBLOCK_A        | match          | differs       | dev-signed                     |
+| FW_MAIN_A       | match          | differs       | netboot driver                 |
+| VBLOCK_B        | match          | match         | unchanged                      |
+| FW_MAIN_B       | differs        | differs       | boot modified Slot B           |
+| RW_NVRAM        | match          | match         | empty                          |
+| RW_VPD          | match          | match         |                                |
+| RO_VPD          | match          | match         |                                |
+
+That same session then wrote FW_MAIN_B back to v3 content via SuzyQ
+(`flashrom -p raiden_debug_spi -w v3.bin --fmap -i FW_MAIN_B`) — 42 s,
+exit=0, "Erase/write done." Confirms read AND write work end-to-end with
+the correct procedure.
+
+## Hardware facts (verified)
+
+- EC firmware: `gale_v1.1.5337-0115719` (2016-10-03 build).
+- USB interface map (subclass / iInterface):
+  - if 0 (0xff/0x50): EC_PD console (`/dev/ttyUSB0`)
+  - if 1 (0xff/0x50): AP console (`/dev/ttyUSB1`)
+  - if 3 (0xff/0x51): raiden_debug_spi bridge (EP 0x83 IN / 0x03 OUT)
+- Power rails the EC controls (verified with `gpioget`):
+  - `SYS_PWR_EN` — master enable
+  - `VDD_3P3_EN` — flash chip Vcc + AP I/O ring
+  - `VDD_1P8_EN` — AP rail
+  - `VDD_1P35_EN` — DDR rail
+  - `VDD_1P1_CPU_EN` — IPQ CPU core
+  - `WP_L` — chip WP pin (1 = deasserted = writable)
+  - `VDD_3P3_2G_EN` — 2.4 GHz radio
+- After `gale power on`: all of the above go to 1.
+- After `gale power off` (from a running AP): CPU/1P8 drop to 0, **3P3 stays
+  at 1** (flash remains powered for the EC bridge), SYS_PWR_EN stays 1.
 
 ## Pre-flash checklist (run for EVERY image)
 
-Use the futility tool we built in this repo (`vboot_reference/build/futility/futility`):
-
-```
-$ futility show IMAGE.bin
+```bash
+$ ./vboot_reference/build/futility/futility show IMAGE.bin
 ```
 
-The output must include for both VBLOCK_A and VBLOCK_B:
-- `Signature: valid` (keyblock signed by GBB rootkey)
-- `Body verification succeeded.` (preamble's body_hash matches actual body)
+For each VBLOCK: must show `Signature: valid` and `Body verification succeeded.`
+If `Body verification` is missing (e.g. preamble has `USE_RO_NORMAL`),
+re-sign with `futility sign --flags 0` so the body hash is recomputed.
 
-If `Digest check failed` or `Body verification` is missing, the image will
-fail vboot Phase 4 → recovery loop → all the painful states described above.
-**Don't flash an image that fails this check.** This is the only mistake from
-this session that I could and should have caught with pre-flight validation.
-
-```
+```bash
 $ python3 -c "
-import struct
-d=open('IMAGE.bin','rb').read()
+import struct, hashlib
+d = open('IMAGE.bin', 'rb').read()
 print('GBB flags: 0x{:08x}'.format(struct.unpack('<I', d[0x30100c:0x301010])[0]))
-"
-```
-
-Verify GBB flags are intentional. Specifically:
-- `FORCE_DEV_SWITCH_ON (0x08)`: needed to auto-enter dev mode for dev-signed
-  RW. Trade-off: changes the recovery loop behavior in ways we don't fully
-  understand. In this session, recovery loop with FORCE_DEV did NOT release
-  the SPI bus reliably, while stock GBB (flags=0) did once.
-- `DEV_SCREEN_SHORT_DELAY (0x01)`: cosmetic; no observed impact.
-- **`DISABLE_FW_ROLLBACK_CHECK (0x20)`: AVOID THIS.** Including it makes
-  the stock recovery loop iterate fast enough to saturate the SPI bus.
-
-```
-$ python3 -c "
-import hashlib
-img = open('IMAGE.bin','rb').read()
 stock = open('/home/tim/local/gwifi/gale-spi-stock-2026-05-28.bin','rb').read()
-assert hashlib.sha256(img[0:0x300000]).digest() == hashlib.sha256(stock[0:0x300000]).digest()
+assert hashlib.sha256(d[0:0x300000]).digest() == hashlib.sha256(stock[0:0x300000]).digest(), 'COREBOOT differs from stock!'
 print('COREBOOT byte-identical to stock — OK')
 "
 ```
 
-This guarantees the COREBOOT invariant for the new image.
+Intentional GBB flags:
+- `FORCE_DEV_SWITCH_ON (0x08)`: auto-enter dev mode for dev-signed RW. Safe.
+- `DEV_SCREEN_SHORT_DELAY (0x01)`: cosmetic. Safe.
+- `DISABLE_FW_ROLLBACK_CHECK (0x20)`: **avoid.** Speeds up recovery-loop
+  iterations to the point where they hammer the SPI bus.
+
+Keeping `COREBOOT` byte-identical to stock means the device can always
+recovery-boot (`gale rec on`) into stock RO depthcharge, which periodically
+yields the SPI bus to the EC bridge. This is your safety net.
 
 ## Driver code rule (bounded retries)
 
-Even with the above flash-side hygiene, a buggy RW driver can lock the SPI
-bus indefinitely. Bound every hardware-touching retry loop and halt cleanly
-when exhausted:
+Even with the right flash procedure, an RW driver that loops forever on
+hardware initialization can hold the SPI bus indefinitely while the AP is
+powered. Bound every hardware-touching retry loop:
 
 ```c
 #define MAX_RETRIES 3
@@ -105,139 +200,54 @@ if (retry_count >= MAX_RETRIES) {
     return;
 }
 retry_count++;
-/* attempt; if it fails, the next poller invocation retries */
+/* attempt; return on failure so the next poll retries */
 ```
 
-In practice this session this halt **did** trigger but **did not** restore
-SuzyQ access — so don't rely on it alone. It still helps because it stops
-adding to the SPI saturation.
+This converts "driver bug = bus deadlock" into "driver bug = quiet failure".
+The AP becomes idle. `gale power off` + flashrom then works as designed.
 
-## What we actually proved works
+## CH341A recovery (true emergency only)
 
-Across the 2026-05-28/29 session, exactly one SuzyQ flash succeeded reliably
-in a known state:
+You should never need this if rules above are followed. If you do:
 
-1. Chip = stock (just restored via CH341A from `gale-spi-stock-2026-05-28.bin`).
-2. UCSI CONNECTOR_RESET (full power cycle to the gale's hub).
-3. `gale rec on; gale dev off`.
-4. `gale power on`.
-5. Wait ~18 seconds (AP UART showed coreboot through TZBSP + USB HOST1 init).
-6. `gale power off` (via EC) then **immediate** `flashrom -p raiden_debug_spi -w IMG --fmap -i FW_MAIN_A`.
-
-This wrote `FW_MAIN_A` (outside `WP_RO`) successfully. The same sequence with
-the chip carrying dev-signed RW + GBB flags 0x09 (FORCE_DEV + SHORT_DELAY)
-did not detect the chip — all subsequent attempts returned `RDID byte 0
-parity violation. id1 0x00, id2 0x00`.
-
-We could not in this session reproduce the working sequence after any other
-flash operation. The original success was likely opportunistic on a specific
-post-boot timing window that we don't fully understand. **Treat that one
-success as anecdotal, not a recipe.**
-
-## Robust SuzyQ recovery procedure (when it works)
-
-For best chance of success when the chip is in a state where SuzyQ should
-work (= stock or near-stock):
-
-```python
-# 1. Hard cycle via UCSI (cuts ALL power)
-sudo sh -c 'echo 0x10003 > /sys/kernel/debug/usb/ucsi/USBC000:00/command'
-
-# 2. Force recovery boot (recovery mode loads RO depthcharge, bypasses RW)
-echo 'gale rec on' > <EC tty>
-echo 'gale dev off' > <EC tty>
-echo 'gale power on' > <EC tty>
-
-# 3. Wait for recovery loop to start
-sleep 22  # (or capture UART and wait for VbBootRecovery messages)
-
-# 4. Atomic: power off AP, then flashrom (NO intervening commands)
-echo 'gale power off' > <EC tty>
-sleep 1.2
-sudo flashrom -p raiden_debug_spi -c "W25Q64BV/W25Q64CV/W25Q64FV" \
-    -w IMG --fmap -i REGION
-```
-
-For `WP_RO` regions (COREBOOT, FMAP, GBB), set `WP_L = 1` BEFORE the power
-off transition: `echo 'gpioset WP_L 1' > <EC tty>` while the EC's rails are
-still alive (the override persists across the power-off transition).
-
-**If `flashrom` returns "No EEPROM/flash device found" with id1=0x00 id2=0x00,
-SuzyQ is not viable for this chip state**. Don't keep cycling — give up,
-acknowledge the emergency, and reach for the CH341A. Repeated SuzyQ attempts
-on a contended bus risk additional chip damage (status register flips,
-interrupted partial writes).
-
-## CH341A recovery (the deterministic fallback)
-
-When SuzyQ fails:
-
-1. Power off the gale: physically unplug the USB-C cable from the laptop.
-2. Clip the CH341A SOIC-8 onto U45 (W25Q64FV). **3.3 V only** — confirm the
+1. Power off the gale: unplug USB-C from the laptop.
+2. Clip CH341A SOIC-8 onto U45 (W25Q64FV). **3.3 V only** — verify the
    programmer's voltage jumper before clipping.
 3. `lsusb` should show `1a86:5512`.
-4. `sudo flashrom -p ch341a_spi --flash-name` should find the chip.
-5. `sudo flashrom -p ch341a_spi -c "W25Q64BV/W25Q64CV/W25Q64FV" -w IMG`
-6. Verify `VERIFIED.` appears.
-7. Unclip, reconnect USB-C, boot.
+4. `sudo flashrom -p ch341a_spi --flash-name` finds the chip.
+5. `sudo flashrom -p ch341a_spi -w IMG.bin`
+6. Verify `VERIFIED.` then unclip and reconnect USB-C.
 
-In this session CH341A worked reliably every time (3 uses, all VERIFIED).
-The first failed-erase-then-retry-with-different-erase-function recovery
-that flashrom did automatically also worked. Treat CH341A as the
-deterministic recovery, not as an emergency fallback.
+See `docs/ch341a-recovery.md` for the detailed step-by-step.
 
 ## What I would do differently next time
 
-1. **Lead with futility-verify** before flashing anything. The first emergency
-   was a stale body_hash in the image that futility would have flagged.
-
-2. **Stick with stock GBB (flags=0)** unless I genuinely need FORCE_DEV.
-   The user-press-the-dev-button-once route is annoying but doesn't put the
-   recovery loop into a busy state.
-
-3. **Build the driver with the bounded-retry-and-halt code from day one**,
-   not as a reaction to the first SPI lockup. Bounded retries are cheap and
-   prevent the worst class of failure.
-
-4. **Treat SuzyQ as opportunistic, not architectural.** Use it when it
-   works, but don't rely on it for recovery. Plan CH341A access into the
-   workflow.
-
-5. **Probe the chip with flashrom every time you're in a known-good state.**
-   This identifies any "lost SuzyQ access" emergency before doing further
-   modifications.
-
-## Open questions (things I didn't fully understand)
-
-- Why does stock RO recovery loop release the SPI bus with stock GBB but
-  not with our modified GBB (FORCE_DEV_SWITCH_ON + DEV_SCREEN_SHORT_DELAY)?
-  The exact mechanism (vboot code path that differs) is unverified.
-
-- Why does depthcharge's `halt()` not free the bus on this hardware? The
-  IPQ's QUP master should idle. Empirically, post-halt flashrom still
-  returns 0x00.
-
-- Whether there's an EC command sequence we haven't found that ACTIVELY
-  drives the bus mux for raiden_debug_spi to take over. We probed all EC
-  commands (`flashwp`, `spixfer`, `syslock`, etc.) and didn't find one.
-
-- Whether holding the AP in reset via some yet-undiscovered EC GPIO path
-  (with VDD_3P3 alive) would give clean SuzyQ access. The IPQ's I/O pads
-  on the SPI lines do something when CPU rail is off, and we couldn't
-  isolate it without a scope.
-
-These remain open. Future hardware-level diagnostics (scope traces of
-SPI lines in various AP states) would resolve them.
+1. **Read `gale-spi-flash-backup.md` BEFORE writing my own SuzyQ scripts.**
+   The procedure was always there. I wrote scripts that added unnecessary
+   pre-flight probes (mistake 2) and the wrong `-c` flag (mistake 1), then
+   blamed the architecture when they failed.
+2. **Run `futility show` on every image before flashing.** A stale body_hash
+   from a forgotten resign is recoverable via SuzyQ; reaching for CH341A
+   first is overreaction.
+3. **Bound every driver retry loop from day one.**
+4. **When a procedure fails, suspect the procedure first.** "SuzyQ is
+   broken" was the wrong root-cause; "I'm passing `-c` when I shouldn't"
+   was the right one.
 
 ## Recovery script inventory
 
-- `tmp/ucsi_hardcycle.py` — software-controlled hard power cycle of the gale.
+- `tmp/ucsi_hardcycle.py` — software-controlled hard power cycle (rarely
+  needed for flashing; useful for recovering from a hung EC).
 - `tmp/flash_rw.py` — SuzyQ-only RW flash (gale power off + atomic flashrom).
-- `tmp/netboot_server.py` — DHCP+TFTP for `enx00e04c68016b` (10.42.1.1).
-- `tmp/bringup.py` — UCSI cycle + power on + capture-and-gate-track.
-- `tmp/test_t_a_to_f.py` — boot test + halt-fallback verification + post-halt
-  SuzyQ probe.
+  Already correct.
+- `tmp/correct_suzyq.py` — full-chip SuzyQ read with the correct procedure.
+- `tmp/correct_suzyq_write.py` — full-region SuzyQ write with the correct
+  procedure.
+- `tmp/verify_regions.py` — region-by-region comparison of a SuzyQ dump
+  against reference images.
+- `tmp/netboot_server.py` — DHCP+TFTP on `enx00e04c68016b` (10.42.1.1).
 
-`docs/ch341a-recovery.md` covers the CH341A procedure in detail.
-`docs/bringup-log.md` is the running diary of what worked, what didn't,
-and why.
+`docs/ch341a-recovery.md` covers the emergency CH341A procedure.
+`docs/bringup-log.md` is the running diary; the late-session "SuzyQ is
+broken" conclusion in that file is wrong — see this document for the
+correct picture.
