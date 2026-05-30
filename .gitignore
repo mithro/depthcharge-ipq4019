@@ -34,3 +34,7 @@
 /tmp/*.leases
 /tmp/*.pcap
 /tmp/*.pid
+# Regenerable build outputs (FIT images, compiled DTBs, raw blobs)
+/tmp/*.itb
+/tmp/*.dtb
+/tmp/*.bin
