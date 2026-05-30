@@ -1,6 +1,14 @@
 <!-- SPDX-License-Identifier: GPL-2.0-or-later -->
 # IPQ4019 depthcharge driver — Implementation Plan
 
+> **STATUS — COMPLETE (2026-05-30).** All four phases below were executed and their
+> exit criteria observed on real hardware: TFTP netboot of OpenWrt works through
+> **both** of gale's onboard ethernet ports. See
+> [`../docs/SUCCESS-2026-05-29.md`](../docs/SUCCESS-2026-05-29.md) and
+> [`../docs/PROOF-both-ports-2026-05-30.md`](../docs/PROOF-both-ports-2026-05-30.md).
+> This plan is retained as the development record; driver upstreaming to ChromeOS
+> depthcharge is the one remaining item (not yet submitted).
+
 > **For Claude:** REQUIRED SUB-SKILL: use `superpowers:executing-plans` to work
 > this plan phase-by-phase. Each phase file is an **iterative loop**, not a
 > one-shot checklist — expect to repeat the build→flash→observe→fix cycle within a
@@ -65,15 +73,15 @@ give the worked diagnosis branches; you fill in what you actually observe.
 
 ## Phases & exit criteria
 
-| Phase | File | Exit criterion (observable) |
-|-------|------|------------------------------|
-| 0 | `phase-0-build-environment.md` | Unmodified `gale.netboot` builds, flashes, boots, and recovers cleanly; MAC printed on console |
-| 1 | `phase-1-proof-of-life.md` | One port reaches link; a DHCP DISCOVER leaves the box and an OFFER is received (seen on console + server `tcpdump`) |
-| 2 | `phase-2-tftp-netboot.md` | A kernel TFTPs in (byte count printed) and `boot()` hands off; kernel banner appears |
-| 3 | `phase-3-full-driver.md` | Both RJ45 ports work; link survives cable replug; code is upstream-quality |
+| Phase | File | Exit criterion (observable) | Status |
+|-------|------|------------------------------|--------|
+| 0 | `phase-0-build-environment.md` | Unmodified `gale.netboot` builds, flashes, boots, and recovers cleanly; MAC printed on console | ✅ met |
+| 1 | `phase-1-proof-of-life.md` | One port reaches link; a DHCP DISCOVER leaves the box and an OFFER is received (seen on console + server `tcpdump`) | ✅ met |
+| 2 | `phase-2-tftp-netboot.md` | A kernel TFTPs in (byte count printed) and `boot()` hands off; kernel banner appears | ✅ met |
+| 3 | `phase-3-full-driver.md` | Both RJ45 ports work; link survives cable replug; code is upstream-quality | ✅ met — both ports proven; upstream *submission* still pending |
 
-Do not start a phase until the previous phase's exit criterion has been
-**observed**, not assumed.
+Each phase's exit criterion was **observed** on hardware (not assumed) before the
+next began; the per-phase docs retain the worked diagnosis branches as a record.
 
 ## Standing setup (all phases)
 

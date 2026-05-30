@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: GPL-2.0-or-later -->
 # depthcharge IPQ4019 ethernet driver (Google Wifi / "gale")
 
-A new **network driver for the Qualcomm IPQ4019 ESS EDMA** ethernet controller,
-to be added to [depthcharge](https://chromium.googlesource.com/chromiumos/platform/depthcharge)
+A **network driver for the Qualcomm IPQ4019 ESS EDMA** ethernet controller,
+added to [depthcharge](https://chromium.googlesource.com/chromiumos/platform/depthcharge)
 (the ChromeOS verified-boot payload) so that the **Google Wifi** router — board
-codename **`gale`** — can do **TFTP netboot** from its *onboard* ethernet ports.
+codename **`gale`** — can **TFTP netboot** from its *onboard* ethernet ports.
+This **works on real hardware** (see [Status](#status)).
 
 ## Why
 
@@ -21,12 +22,24 @@ implementing depthcharge's `NetDevice` interface for the **ESS EDMA at
 
 ## Status
 
+**Working on real hardware.** TFTP netboot of OpenWrt succeeds through *both* of
+gale's onboard ethernet jacks — verified end-to-end (DHCP → TFTP → FIT parse →
+Linux boots to the userspace console at 1 Gbps/full). See
+[`docs/SUCCESS-2026-05-29.md`](docs/SUCCESS-2026-05-29.md) and
+[`docs/PROOF-both-ports-2026-05-30.md`](docs/PROOF-both-ports-2026-05-30.md).
+
 | Phase | Goal | State |
 |-------|------|-------|
-| 0 | Build environment + flash/recover loop (from scratch) | planned |
-| 1 | Proof-of-life: one port links, raw TX/RX, DHCP reply seen | planned |
-| 2 | TFTP netboot: download + boot a kernel (Ctrl+N / `netboot` image) | planned |
-| 3 | Full driver: both ports, robust link, upstream-quality | planned |
+| 0 | Build environment + flash/recover loop (from scratch) | ✅ done — see [`docs/build.md`](docs/build.md) |
+| 1 | Proof-of-life: one port links, raw TX/RX, DHCP reply seen | ✅ done |
+| 2 | TFTP netboot: download + boot a kernel (Ctrl+N / `netboot` image) | ✅ done |
+| 3 | Full driver: both ports, robust link | ✅ done — both jacks proven; ~17k RX pkts, 0 drops |
+| — | Upstreaming the driver to ChromeOS depthcharge | ⬜ not yet submitted |
+
+> **Known limitation (not a driver or netboot issue):** the OpenWrt *initramfs*
+> kernel panics ~1 s after reaching the console when `ath10k_pci` can't find WiFi
+> calibration data — gale keeps it in SPI flash, which isn't reachable during a
+> netboot. Networking reaches 1 Gbps/full and userspace `init` runs regardless.
 
 ## Repository layout
 
@@ -46,8 +59,10 @@ reference/           Vendored upstream source (GPL-2.0+) used as port references
 
 1. Read `docs/design.md` for the architecture and the U-Boot→depthcharge mapping.
 2. Read `docs/hardware.md` for concrete register addresses and the bring-up recipe.
-3. Work `plan/phase-0` → `phase-3` in order; each phase is an iterative
-   build→flash→observe→fix loop with explicit exit criteria.
+3. The `plan/phase-0` → `phase-3` docs record the iterative
+   build→flash→observe→fix work (**all phases complete**); `docs/build.md` is the
+   reproducible build recipe and `docs/SUCCESS-*` / `docs/PROOF-*` are the
+   verified results.
 
 ## License
 
