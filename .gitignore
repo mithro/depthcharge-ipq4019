@@ -9,8 +9,8 @@
 *.map
 *.tmp
 
-# Upstream trees fetched for building/reference (not vendored)
-/depthcharge/
+# depthcharge is vendored as a submodule (see .gitmodules) — NOT ignored.
+# Other upstream trees are fetched for building/reference (not vendored):
 /u-boot/
 /openwrt/
 /coreboot/
