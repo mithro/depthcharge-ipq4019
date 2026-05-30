@@ -27,12 +27,12 @@ SHARED_OFF  = 0x550000
 SHARED_SIZE = 0x10000   # 64 KB (from FMAP)
 FLASH_SIZE  = 0x800000  # 8 MiB W25Q64
 
-# `init=/bin/sh` escapes procd entirely so kmodloader never runs and we
-# get a raw busybox shell at PID 1. From there we can manually inspect
-# /sys/firmware, /proc/kallsyms, /lib/modules and decide what to do
-# about the ath10k_pci probe oops (which kills the kernel because
-# OpenWrt builds with CONFIG_PANIC_ON_OOPS=y).
-KERNEL_ARGS = b"init=/bin/sh\x00"
+# Tell Linux: mount /dev/mmcblk0p2 as rootfs (squashfs), and use init=/sbin/init
+# from there. /dev/mmcblk0p2 is the OpenWrt squashfs rootfs (populated by our
+# `dd factory.bin to /dev/mmcblk0` earlier). Combined with `noinitrd` (or
+# similar), the kernel won't unpack the built-in OpenWrt initramfs and will
+# directly use the MMC squashfs as rootfs. Then OpenWrt runs from MMC.
+KERNEL_ARGS = b"root=/dev/mmcblk0p2 rootfstype=squashfs ro\x00"
 
 NETBOOT_SIG = b"netboot\x00"   # sizeof("netboot") in C includes NUL = 8
 
