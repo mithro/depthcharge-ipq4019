@@ -1,0 +1,26 @@
+diff --git a/payloads/libpayload/Makefile.inc b/payloads/libpayload/Makefile.inc
+index c10718f..74f88ee 100644
+--- a/payloads/libpayload/Makefile.inc
++++ b/payloads/libpayload/Makefile.inc
+@@ -64,7 +64,7 @@ CFLAGS += -nostdlib -fno-builtin -ffreestanding -fomit-frame-pointer
+ CFLAGS += -ffunction-sections -fdata-sections
+ CFLAGS += -Wall -Wundef -Wstrict-prototypes -Wmissing-prototypes
+ CFLAGS += -Wwrite-strings -Wredundant-decls -Wno-trigraphs
+-CFLAGS += -Wstrict-aliasing -Wshadow -Werror
++CFLAGS += -Wstrict-aliasing -Wshadow -fcommon
+ 
+ $(obj)/libpayload-config.h: $(KCONFIG_AUTOHEADER)
+ 	cmp $@ $< 2>/dev/null || cp $< $@
+diff --git a/util/cbfstool/Makefile.inc b/util/cbfstool/Makefile.inc
+index f480616..3499887 100644
+--- a/util/cbfstool/Makefile.inc
++++ b/util/cbfstool/Makefile.inc
+@@ -59,7 +59,7 @@ rmodobj += common.o
+ rmodobj += elfheaders.o
+ rmodobj += xdr.o
+ 
+-TOOLCFLAGS ?= -Werror -Wall -Wextra
++TOOLCFLAGS ?= -Wall -Wextra
+ TOOLCFLAGS += -Wcast-qual -Wmissing-prototypes -Wredundant-decls -Wshadow
+ TOOLCFLAGS += -Wstrict-prototypes -Wwrite-strings
+ TOOLCPPFLAGS ?= -D_DEFAULT_SOURCE # memccpy() from string.h

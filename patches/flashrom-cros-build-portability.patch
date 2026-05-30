@@ -1,0 +1,34 @@
+diff --git a/Makefile b/Makefile
+index 85edb40..ab8e97a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -35,7 +35,7 @@ PKG_CONFIG ?= pkg-config
+ WARNERROR ?= yes
+ 
+ ifneq ($(NOWARNERROR),yes)
+-CFLAGS += -Werror
++CFLAGS += -Wno-error -fcommon
+ endif
+ 
+ ifeq ($(CONFIG_STATIC),yes)
+@@ -263,7 +263,7 @@ endif
+ 
+ LOCK_OBJS = big_lock.o file_lock.o cros_ec_lock.o
+ LIB_OBJS += $(LOCK_OBJS)
+-FEATURE_CFLAGS += -D'USE_BIG_LOCK=1' -D'USE_CROS_EC_LOCK=1'
++FEATURE_CFLAGS += -D'USE_BIG_LOCK=0' -D'USE_CROS_EC_LOCK=0'
+ 
+ CLI_OBJS = flashrom.o cli_mfg.o cli_output.o print.o
+ 
+diff --git a/search.c b/search.c
+index d071ee2..fd440d7 100644
+--- a/search.c
++++ b/search.c
+@@ -38,6 +38,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <limits.h>
+ 
+ #include "flash.h"
+ #include "search.h"

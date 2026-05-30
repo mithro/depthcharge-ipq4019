@@ -4,7 +4,11 @@
 Verified working 2026-05-28 on Ubuntu (GCC 13, GNU make 4.3). Produces
 `depthcharge/build/netboot.payload` (a CBFS SELF payload) for board **gale**.
 Because the chromiumos trees are 2016-era, a modern toolchain needs the fixes
-below. All source trees are cloned at branch **`firmware-gale-8281.B`** (gitignored).
+below. `depthcharge` is vendored as a submodule (the
+[mithro/depthcharge](https://github.com/mithro/depthcharge) fork, which already
+carries the driver + these fixes); the other trees are gitignored build-time
+clones at branch **`firmware-gale-8281.B`**. Ready-to-apply patch artifacts for
+the fixes below are in [`../patches/`](../patches/README.md).
 
 ## 0. Trees (all `firmware-gale-8281.B`)
 ```

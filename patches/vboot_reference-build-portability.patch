@@ -1,0 +1,87 @@
+diff --git a/Makefile b/Makefile
+index dd28834..a822657 100644
+--- a/Makefile
++++ b/Makefile
+@@ -128,7 +128,7 @@ endif
+ #
+ # Flag ordering: arch, then -f, then -m, then -W
+ DEBUG_FLAGS := $(if ${DEBUG},-g -O0,-Os)
+-WERROR := -Werror
++WERROR :=
+ COMMON_FLAGS := -nostdinc -pipe \
+ 	-ffreestanding -fno-builtin -fno-stack-protector \
+ 	${WERROR} -Wall -Wstrict-prototypes ${DEBUG_FLAGS}
+@@ -154,7 +154,7 @@ CFLAGS ?= ${COMMON_FLAGS} \
+ else
+ # FIRMWARE_ARCH not defined; assuming local compile.
+ CC ?= gcc
+-CFLAGS += -DCHROMEOS_ENVIRONMENT -Wall ${WERROR} ${DEBUG_FLAGS}
++CFLAGS += -DCHROMEOS_ENVIRONMENT -Wall ${WERROR} ${DEBUG_FLAGS} -fcommon
+ endif
+ 
+ ifneq (${CUSTOM_MUSIC},)
+diff --git a/futility/cmd_create.c b/futility/cmd_create.c
+index 143ea9a..28c62f7 100644
+--- a/futility/cmd_create.c
++++ b/futility/cmd_create.c
+@@ -193,7 +193,7 @@ static int vb2_make_keypair()
+ 		goto done;
+ 	}
+ 	/* Public keys doesn't have the private exponent */
+-	has_priv = !!rsa_key->d;
++	has_priv = !!RSA_get0_d(rsa_key);
+ 	if (!has_priv)
+ 		fprintf(stderr, "%s has a public key only.\n", infile);
+ 
+diff --git a/futility/vb2_helper.c b/futility/vb2_helper.c
+index 51a7837..8cf0411 100644
+--- a/futility/vb2_helper.c
++++ b/futility/vb2_helper.c
+@@ -223,10 +223,10 @@ int ft_show_pem(const char *name, uint8_t *buf, uint32_t len, void *data)
+ 		DIE;
+ 
+ 	/* Use to presence of the private exponent to decide if it's public */
+-	printf("%s Key file:      %s\n", rsa_key->d ? "Private" : "Public",
++	printf("%s Key file:      %s\n", RSA_get0_d(rsa_key) ? "Private" : "Public",
+ 					 name);
+ 
+-	bits = BN_num_bits(rsa_key->n);
++	bits = BN_num_bits(RSA_get0_n(rsa_key));
+ 	printf("  Key length:          %d\n", bits);
+ 
+ 	if (vb_keyb_from_rsa(rsa_key, &keyb, &keyb_len)) {
+diff --git a/host/lib/util_misc.c b/host/lib/util_misc.c
+index 03ec683..a66e174 100644
+--- a/host/lib/util_misc.c
++++ b/host/lib/util_misc.c
+@@ -65,7 +65,7 @@ int vb_keyb_from_rsa(struct rsa_st *rsa_private_key,
+ 	int retval = 1;
+ 
+ 	/* Size of RSA key in 32-bit words */
+-	nwords = BN_num_bits(rsa_private_key->n) / 32;
++	nwords = BN_num_bits(RSA_get0_n(rsa_private_key)) / 32;
+ 
+ 	bufsize = (2 + nwords + nwords) * sizeof(uint32_t);
+ 	outbuf = malloc(bufsize);
+@@ -94,7 +94,7 @@ int vb_keyb_from_rsa(struct rsa_st *rsa_private_key,
+ 	NEW_BIGNUM(B);
+ #undef NEW_BIGNUM
+ 
+-	BN_copy(N, rsa_private_key->n);
++	BN_copy(N, RSA_get0_n(rsa_private_key));
+ 	BN_set_word(Big1, 1L);
+ 	BN_set_word(Big2, 2L);
+ 	BN_set_word(Big32, 32L);
+diff --git a/host/lib21/host_key.c b/host/lib21/host_key.c
+index f7ea162..5c0243c 100644
+--- a/host/lib21/host_key.c
++++ b/host/lib21/host_key.c
+@@ -544,7 +544,7 @@ int vb2_public_key_hash(struct vb2_public_key *key,
+ 
+ enum vb2_signature_algorithm vb2_rsa_sig_alg(struct rsa_st *rsa)
+ {
+-	int bits = BN_num_bits(rsa->n);
++	int bits = BN_num_bits(RSA_get0_n(rsa));
+ 
+ 	switch (bits) {
+ 	case 1024:
