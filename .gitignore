@@ -34,7 +34,13 @@
 /tmp/*.leases
 /tmp/*.pcap
 /tmp/*.pid
-# Regenerable build outputs (FIT images, compiled DTBs, raw blobs)
+# Regenerable build outputs (FIT images, DTBs, kernel modules, disasm, overlays)
 /tmp/*.itb
 /tmp/*.dtb
 /tmp/*.bin
+/tmp/*.vboot
+/tmp/*.ko
+/tmp/*.cpio
+/tmp/*.dis
+/tmp/peek
+/tmp/*-stage/

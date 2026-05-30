@@ -39,6 +39,10 @@ PATCHES = {
     "wifi_a000000":          "off",     # 5 GHz (no pinctrl on this node)
     "wifi_a800000":          "off",     # 2.4 GHz (has pinctrl-0=<0x1c>)
     "strip_wifi_pinctrl":    False,     # also drop pinctrl-0/names from a800000
+    "rename_wifi_compat":    False,     # change wifi compatible so no driver binds
+    "strip_wifi_clocks_resets": False,  # drop clocks/resets so ath10k probe fails cleanly
+    "strip_wifi_resets_only":   False,  # drop only resets
+    "strip_wifi_clocks_only":   False,  # drop only clocks
     "add_coreboot_reg":      True,
 }
 
@@ -124,6 +128,37 @@ def patch_dtb(dtb: bytes) -> bytes:
         del_prop("/soc/wifi@a800000", "pinctrl-0")
         del_prop("/soc/wifi@a800000", "pinctrl-names")
 
+    # Diagnostic: change wifi node compatible to a string no driver matches.
+    # Use when we want the node present (so the kernel doesn't ignore it)
+    # but ath10k won't bind to it. This is useful for isolating whether
+    # the panic comes from ath10k probe vs. something else.
+    if PATCHES.get("rename_wifi_compat"):
+        for path in ("/soc/wifi@a000000", "/soc/wifi@a800000"):
+            try:
+                off = fdt.path_offset(path)
+            except libfdt.FdtException:
+                continue
+            fdt.setprop(off, "compatible", b"unused,nothing\x00")
+            print(f"  [set] {path} compatible = 'unused,nothing'")
+
+    # Diagnostic: strip clocks+resets from wifi nodes. ath10k_ahb_probe
+    # calls clk_get(dev,name) → -ENOENT → bails out before any register
+    # access. Lets us see whether the panic is in clk/reset framework
+    # or after it.
+    if PATCHES.get("strip_wifi_clocks_resets"):
+        for path in ("/soc/wifi@a000000", "/soc/wifi@a800000"):
+            for prop in ("clocks", "clock-names",
+                         "resets", "reset-names"):
+                del_prop(path, prop)
+    if PATCHES.get("strip_wifi_resets_only"):
+        for path in ("/soc/wifi@a000000", "/soc/wifi@a800000"):
+            for prop in ("resets", "reset-names"):
+                del_prop(path, prop)
+    if PATCHES.get("strip_wifi_clocks_only"):
+        for path in ("/soc/wifi@a000000", "/soc/wifi@a800000"):
+            for prop in ("clocks", "clock-names"):
+                del_prop(path, prop)
+
     if PATCHES.get("add_coreboot_reg"):
         add_coreboot_node()
 
@@ -132,16 +167,17 @@ def patch_dtb(dtb: bytes) -> bytes:
     return bytes(fdt.as_bytearray())
 
 
-def rebuild_fit(orig: bytes, new_inner_dtb: bytes) -> bytes:
+def rebuild_fit(orig: bytes, new_inner_dtb: bytes, ramdisk: bytes = None) -> bytes:
     """Build a new FIT by cloning the outer FIT and replacing /images/fdt-1's
-    `data` property + its hash subnodes.
+    `data` property + its hash subnodes. Optionally adds a ramdisk image.
 
     pylibfdt can edit FDTs in-place. We resize, replace data, recompute
     hashes, pack."""
     fdt = libfdt.Fdt(bytearray(orig))
     # Outer FIT is itself a flat DT. Need plenty of headroom because data
-    # property might grow (or shrink).
-    extra = max(0, len(new_inner_dtb) - len(orig)) + 8192
+    # property might grow (or shrink). Add ramdisk size + spare.
+    rd_size = len(ramdisk) if ramdisk is not None else 0
+    extra = max(0, len(new_inner_dtb) - len(orig)) + rd_size + 16384
     fdt.resize(len(orig) + extra)
 
     images_off = fdt.subnode_offset(0, "images")
@@ -176,6 +212,33 @@ def rebuild_fit(orig: bytes, new_inner_dtb: bytes) -> bytes:
             print(f"  [set] /images/fdt-1/{name}/value = sha256 {new_sha256.hex()}")
         sub = fdt.next_subnode(sub, libfdt.QUIET_NOTFOUND)
 
+    if ramdisk is not None:
+        # Add /images/ramdisk-1 + reference from config@1
+        try:
+            rd_off = fdt.subnode_offset(images_off, "ramdisk-1")
+        except libfdt.FdtException:
+            rd_off = fdt.add_subnode(images_off, "ramdisk-1")
+        fdt.setprop(rd_off, "description", b"OpenWrt overlay initramfs\x00")
+        fdt.setprop(rd_off, "data", ramdisk)
+        fdt.setprop(rd_off, "type", b"ramdisk\x00")
+        fdt.setprop(rd_off, "arch", b"arm\x00")
+        fdt.setprop(rd_off, "os", b"linux\x00")
+        fdt.setprop(rd_off, "compression", b"none\x00")
+        rd_hash = hashlib.sha1(ramdisk).digest()
+        try:
+            h = fdt.subnode_offset(rd_off, "hash-1")
+        except libfdt.FdtException:
+            h = fdt.add_subnode(rd_off, "hash-1")
+        fdt.setprop(h, "algo", b"sha1\x00")
+        fdt.setprop(h, "value", rd_hash)
+        print(f"  [add] /images/ramdisk-1 data=<{len(ramdisk)} B> sha1={rd_hash.hex()}")
+
+        # Reference ramdisk from configurations/config@1
+        configs = fdt.subnode_offset(0, "configurations")
+        cfg = fdt.subnode_offset(configs, "config@1")
+        fdt.setprop(cfg, "ramdisk", b"ramdisk-1\x00")
+        print(f"  [set] /configurations/config@1/ramdisk = 'ramdisk-1'")
+
     fdt.pack()
     return bytes(fdt.as_bytearray())
 
@@ -199,9 +262,15 @@ def main():
     patched_inner = patch_dtb(inner)
     print(f"  patched DTB size: {len(patched_inner)} bytes")
 
-    # Rebuild FIT
+    # Rebuild FIT (optionally with ramdisk overlay)
     print("=== Rebuild FIT")
-    new_fit = rebuild_fit(fit, patched_inner)
+    rd_path = os.environ.get("FIT_RAMDISK")
+    rd_bytes = None
+    if rd_path:
+        with open(rd_path, "rb") as f:
+            rd_bytes = f.read()
+        print(f"  ramdisk: {rd_path} ({len(rd_bytes)} B)")
+    new_fit = rebuild_fit(fit, patched_inner, ramdisk=rd_bytes)
     print(f"  new FIT size: {len(new_fit)} bytes")
 
     with open(OUT, "wb") as f:
