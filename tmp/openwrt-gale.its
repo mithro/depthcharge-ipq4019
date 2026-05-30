@@ -1,0 +1,46 @@
+/dts-v1/;
+/ {
+    description = "ARM OpenWrt FIT";
+    #address-cells = <1>;
+    images {
+        kernel-1 {
+            description = "ARM OpenWrt Linux";
+            data = /incbin/("/home/tim/local/gwifi/depthcharge-ipq4019/tmp/openwrt-gale-kernel.bin");
+            type = "kernel";
+            arch = "arm";
+            os = "linux";
+            compression = "none";
+            load = <0x80208000>;
+            entry = <0x80208000>;
+            hash-1 { algo = "crc32"; };
+            hash-2 { algo = "sha1"; };
+        };
+        fdt-1 {
+            description = "ARM OpenWrt gale DTB (patched)";
+            data = /incbin/("/home/tim/local/gwifi/depthcharge-ipq4019/tmp/openwrt-gale-patched.dtb");
+            type = "flat_dt";
+            arch = "arm";
+            compression = "none";
+            hash-1 { algo = "crc32"; };
+            hash-2 { algo = "sha1"; };
+        };
+        ramdisk-1 {
+            description = "Pivot overlay initramfs (xz)";
+            data = /incbin/("/home/tim/local/gwifi/depthcharge-ipq4019/tmp/openwrt-pivot-overlay.cpio");
+            type = "ramdisk";
+            arch = "arm";
+            os = "linux";
+            compression = "none";
+            hash-1 { algo = "sha1"; };
+        };
+    };
+    configurations {
+        default = "config@1";
+        config@1 {
+            description = "OpenWrt google_wifi";
+            kernel = "kernel-1";
+            fdt = "fdt-1";
+            ramdisk = "ramdisk-1";
+        };
+    };
+};
