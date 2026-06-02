@@ -29,19 +29,12 @@ git -C coreboot apply ../patches/coreboot-build-portability.patch
 git clone https://chromium.googlesource.com/chromiumos/platform/vboot_reference vboot_reference
 git -C vboot_reference checkout 8fc5916c7f66627be26203aa4f0d800a266b4b4b
 git -C vboot_reference apply ../patches/vboot_reference-build-portability.patch
-
-# flashrom-cros
-git clone https://chromium.googlesource.com/chromiumos/third_party/flashrom flashrom-cros
-git -C flashrom-cros checkout 59543cd1371071a950befaf0a123b2f4f0b807c8
-git -C flashrom-cros apply ../patches/flashrom-cros-build-portability.patch
-
 ```
 
 | Tree | Upstream | Pinned commit | Patch | Extra |
 |------|----------|---------------|-------|-------|
 | `coreboot` | https://chromium.googlesource.com/chromiumos/third_party/coreboot | `9ff56abe09ac` | `coreboot-build-portability.patch` | `coreboot-libpayload-config.gale` → `payloads/libpayload/configs/config.gale` |
 | `vboot_reference` | https://chromium.googlesource.com/chromiumos/platform/vboot_reference | `8fc5916c7f66` | `vboot_reference-build-portability.patch` | — |
-| `flashrom-cros` | https://chromium.googlesource.com/chromiumos/third_party/flashrom | `59543cd13710` | `flashrom-cros-build-portability.patch` | — |
 
 > Note: coreboot also needs its own `3rdparty/vboot` symlink and the generated
 > `util/cbfstool/fmd_{parser,scanner}.h` (bison/flex output) — both are build

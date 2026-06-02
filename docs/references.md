@@ -7,10 +7,6 @@ All sources below were read on 2026-05-28 and pinned to the commits shown.
 
 - **Device**: Google Wifi, board codename **`gale`**, SoC **Qualcomm IPQ4019**
   (ARMv7 Cortex-A7 quad-core, "Dakota"/IPQ40xx family).
-- **Firmware on device**: 8 MiB Winbond W25Q64 SPI-NOR. coreboot RO + depthcharge
-  payload in `RW_SECTION_A/B`. eMMC holds kernel/rootfs only.
-- **Debug access**: SuzyQ cable → 2× `/dev/ttyUSB` (AP + EC consoles), EC-mediated
-  (no Cr50). Serial console is the primary bring-up instrument.
 
 ## depthcharge (the payload we are modifying)
 
