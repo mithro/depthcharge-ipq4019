@@ -24,9 +24,7 @@ implementing depthcharge's `NetDevice` interface for the **ESS EDMA at
 
 **Working on real hardware.** TFTP netboot of OpenWrt succeeds through *both* of
 gale's onboard ethernet jacks — verified end-to-end (DHCP → TFTP → FIT parse →
-Linux boots to the userspace console at 1 Gbps/full). See
-[`docs/SUCCESS-2026-05-29.md`](docs/SUCCESS-2026-05-29.md) and
-[`docs/PROOF-both-ports-2026-05-30.md`](docs/PROOF-both-ports-2026-05-30.md).
+Linux boots to the userspace console at 1 Gbps/full).
 
 | Phase | Goal | State |
 |-------|------|-------|
@@ -37,9 +35,15 @@ Linux boots to the userspace console at 1 Gbps/full). See
 | — | Upstreaming the driver to ChromeOS depthcharge | ⬜ not yet submitted |
 
 > **Known limitation (not a driver or netboot issue):** the OpenWrt *initramfs*
-> kernel panics ~1 s after reaching the console when `ath10k_pci` can't find WiFi
-> calibration data — gale keeps it in SPI flash, which isn't reachable during a
-> netboot. Networking reaches 1 Gbps/full and userspace `init` runs regardless.
+> kernel panics ~1 s after reaching the console when `ath10k_pci` can't find
+> WiFi calibration data. gale keeps the calibration in `RO_VPD` (SPI flash, as
+> `wifi_base64_calibration0/1`) and coreboot's ramstage *does* stage it into
+> CBMEM — observable on the AP serial console as
+> `cbmem_add_vpd_calibration_data: added wifi_base64_calibration0/1 to CBMEM`.
+> The issue is on the kernel side: stock OpenWrt's `ath10k_pci` looks for
+> calibration in an MTD partition / nvmem cell that a netbooted initramfs
+> doesn't have, not in CBMEM. Networking reaches 1 Gbps/full and userspace
+> `init` runs regardless.
 
 ## Repository layout
 

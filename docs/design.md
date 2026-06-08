@@ -115,9 +115,17 @@ depthcharge builds several payloads (`src/Makefile.inc`). Net drivers
 - **`netboot`** — standalone TFTP-netboot payload (`netboot_entry` is `main`).
 - **`dev`** — developer image (normal boot **+** Ctrl+N netboot).
 
-The normal verified-boot `depthcharge` payload does **not** include net code, so
-this driver adds **zero size/risk to the production boot path**. Build with e.g.
-`make BOARD=gale ... gale.netboot` (exact invocation pinned in `plan/phase-0`).
+The standard verified-boot `depthcharge` payload does **not** include net code,
+so this driver adds **zero size or risk to that payload as a build artifact**.
+Build with e.g. `make BOARD=gale ... gale.netboot` (exact invocation pinned in
+`plan/phase-0`).
+
+Where the resulting `netboot` (or `dev`) payload **ends up in the gale's SPI
+flash** is a separate deployment decision, not a property of building it.
+On a stock gale, the running depthcharge lives in `FW_MAIN_A/fallback/payload`
+(the active RW slot) and the recovery copy lives in `COREBOOT/fallback/payload`.
+A `netboot` deployment replaces one or the other — see the SPI layout & boot
+chain notes in the umbrella repo (`docs/gale-boot-process.md`).
 
 ## 7. Verification strategy
 
@@ -128,9 +136,12 @@ Each phase has explicit, observable exit criteria (see `plan/`), e.g.:
   received (watch with `tcpdump` on the server side too).
 - Phase 2: `tftp_read` reports the kernel byte count and `boot()` hands off.
 
-Because there is no production-path impact and the `netboot`/`dev` images live in
-the RW payload, the build→flash→observe loop is recoverable (RO coreboot +
-recovery image remain intact). `plan/phase-0` establishes the safe reflash/recover
+The `netboot`/`dev` payloads are separate binaries from the verified-boot
+`depthcharge` payload, so the build step has no effect on what's running on a
+target board until you flash the result. The SuzyQ + EC raiden bridge
+(see the umbrella `tools/` toolkit) gives full read/write to any SPI region
+from a host, so the build→flash→observe loop is recoverable from any
+known-good SPI backup. `plan/phase-0` establishes the safe reflash/recover
 cycle **before** any driver code is written.
 
 ## 8. Risks (ranked)
